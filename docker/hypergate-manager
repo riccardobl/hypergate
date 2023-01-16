@@ -1,0 +1,557 @@
+#!/bin/bash
+set -e
+if [ "$DOCKER_IMAGE" = "" ];
+then
+    export DOCKER_IMAGE=hypergate
+fi
+if [ "$CONFDIR" = "" ];
+then
+    export CONFDIR="$HOME/.hypergate-manager/"
+fi
+mkdir -p "$CONFDIR"
+
+function hypergate_utils_newSecret {
+    openssl rand -hex 32
+}
+
+function hypergate_utils_checkSecret {
+    if [ "$1" = "aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648" ];
+    then
+        echo "\
+Whoa! You tried to use the secret found in the README! That would expose your containers to unauthorized parties! \
+Please create a new secret using 'hypergate-manager utils newSecret'.
+        "
+        exit 1
+    fi
+}
+
+function hypergate_utils_getName {
+    if [ "$ROUTER_NAME" != "" ];
+    then
+        echo $ROUTER_NAME
+    else
+        secret=$1
+        hypergate_utils_checkSecret $secret
+        hash=`echo $secret | sha256sum | cut -d' ' -f1`
+        shortName=`echo $hash | cut -c1-12`
+        echo $shortName
+    fi
+}
+
+function hypergate_utils_install {
+    if [ "$1" = "" ];
+    then
+        echo "Usage: hypergate-manager utils install <secret>"
+        exit 1
+    fi
+
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+        
+    touch "$CONFDIR/hypergate-services-$name" || true
+        
+    hypergate_gateway_create $secret
+    hypergate_provider_create $secret
+    
+}
+
+function hypergate_utils_uninstall {
+    if [ "$1" = "" ];
+    then
+        echo "Usage: hypergate-manager utils uninstall <secret>"
+        exit 1
+    fi
+
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+      
+
+    # Remove all containers
+    containers=$(docker ps -a -q --filter="name=hypergate_${name}_")
+    for container in $containers; do
+        docker stop $container || true
+        docker rm $container || true
+    done
+
+
+    # Remove all networks but first disconnect all containers
+    networks=$(docker network ls -q --filter="name=hypergate_${name}_")
+    for network in $networks; do
+        containers=$(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' $network )
+        for container in $containers; do
+            docker network disconnect $network $container || true
+        done
+        docker network rm $network || true
+    done
+
+    rm "$CONFDIR/hypergate-services-$name"  || true
+}
+
+
+
+
+
+function hypergate_gateway_create  {    
+    if [ "$1" = "" ] || [ "$2" = "" ]; 
+    then
+        echo "Usage: hypergate-manager gateway create <secret> [csv ports to expose]"
+        echo "Example: hypergate-manager gateway create 1234 80/tcp,443/tcp"
+        exit 1
+    fi
+
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+    
+    # ports_string="$2"
+     ports_string=""
+    if [ "$2" != "" ];
+    then
+        OLDIFS=$IFS
+        IFS=',' read -ra portsArray <<< "$2"
+        for port in "${portsArray[@]}"; do
+            localPort=`echo $port | cut -d'/' -f1`
+            ports_string="$ports_string -p $localPort:$port"
+        done
+        IFS=$OLDIFS
+    fi
+
+    ( docker stop hypergate_${name}_gateway ||true )  > /dev/null 2>&1
+    ( docker rm hypergate_${name}_gateway ||true  ) > /dev/null 2>&1
+
+    debug=""
+    if [ "$DEBUG" = "true" ];
+    then
+        debug="--verbose"
+    fi
+
+    ipv6=""
+    if [ "$WITH_IPV6" != "" ];
+    then
+        ipv6="--ipv6"
+    fi
+
+    providerToGatewayNetwork="hypergate_${name}_providertogateway_network"
+    ( docker network create -d bridge $providerToGatewayNetwork || true ) > /dev/null 2>&1
+
+    docker run -d  --network $providerToGatewayNetwork --restart=always $ports_string --tmpfs /tmp --read-only --name hypergate_${name}_gateway \
+     $DOCKER_IMAGE --gateway $secret --listen 0.0.0.0 $debug --allowGates allports/udp,allports/tcp $ipv6 --api 127.0.0.1:2375
+    echo "Gateway container hypergate_${name}_gateway is ready"
+}
+
+
+function hypergate_gateway_expose {
+    if [ "$1" = "" ] || [ "$2" = "" ];
+    then
+        echo "Usage: hypergate-manager gateway expose <secret> [port to expose || auto]"
+        exit 1
+    fi
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+    
+    exposedPorts=($(docker inspect hypergate_${name}_gateway | jq -r '.[0].NetworkSettings.Ports | to_entries[] | .key'))
+    
+    if [ "$2" = "auto" ];
+    then
+        openPorts=($(docker exec hypergate_${name}_gateway bash -c "curl -s 127.0.0.1:2375/gates | jq -r '.[] | select(.portBind == true) | .port + \"/\" + .protocol'"))
+
+        rebuild="false"
+        if [ ${#exposedPorts[@]} -ne ${#openPorts[@]} ]; then
+            rebuild="true"
+        else
+            for i in "${!exposedPorts[@]}"; do
+                if ! [[ ${openPorts[*]} =~ ${exposedPorts[i]} ]]; then
+                    rebuild="true"
+                    break
+                fi
+            done
+        fi
+
+        if [ "$rebuild" == "true" ]; then
+            openPortsCSV=$(IFS=, ; echo "${openPorts[*]}")
+            echo "Expose $openPortsCSV"
+            hypergate_gateway_create $secret $openPortsCSV
+        fi
+    else    
+        if [[ ! $exposedPorts =~ (^|[[:space:]])$2($|[[:space:]]) ]];
+        then
+            ports_string=""
+            for port in $exposedPorts; do
+                if [ "$ports_string" != "" ];
+                then
+                    ports_string="$ports_string,"
+                fi
+                ports_string="$ports_string$port"
+            done         
+            ports_string="$ports_string$2"
+            echo "Expose $ports_string"
+            hypergate_gateway_create $secret "$ports_string"
+        fi
+
+    fi
+
+}
+
+function hypergate_gateway_unexpose {
+    if [ "$1" = "" ] || [ "$2" = "" ];
+    then
+        echo "Usage: hypergate-manager gateway unexpose <secret> [port to hide]"
+        exit 1
+    fi
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+  
+    exposedPorts="`docker container inspect --format='{{range $p, $conf := .Config.ExposedPorts}}{{$p}},{{end}}' hypergate_${name}_gateway  | sed 's/,$//'`"
+   
+    ports_string=""
+    OLDIFS=$IFS
+    IFS=',' read -ra portsArray <<< "$exposedPorts"
+    for port in "${portsArray[@]}"; do
+        if [[ $port != $2* ]];
+        then
+            if [ "$ports_string" != "" ];
+            then
+                ports_string="$ports_string,"
+            fi
+            ports_string="$ports_string$port"
+        else 
+            echo "Close $port"
+        fi
+    done
+    IFS=$OLDIFS
+   
+    hypergate_gateway_create $secret "$ports_string"
+}
+
+function hypergate_provider_create {
+    if [ "$1" = "" ];
+    then
+        echo "Usage: hypergate-manager provider create <secret>"
+        exit 1
+    fi
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+
+    ( docker stop hypergate_${name}_provider||true ) > /dev/null 2>&1
+    ( docker rm hypergate_${name}_provider||true  ) > /dev/null 2>&1
+    
+    debug=""
+    if [ "$DEBUG" = "true" ];
+    then
+        debug="--verbose"
+    fi
+
+    ipv6=""
+    if [ "$WITH_IPV6" != "" ];
+    then
+        ipv6="--ipv6"
+    fi
+
+    providerToGatewayNetwork="hypergate_${name}_providertogateway_network"
+    ( docker network create -d bridge $providerToGatewayNetwork || true ) > /dev/null 2>&1
+
+    docker run -d --restart=always --network $providerToGatewayNetwork --tmpfs /tmp --read-only -v"$CONFDIR/hypergate-services-$name":/conf/hypergate-services \
+    --name hypergate_${name}_provider $DOCKER_IMAGE --provider $secret $debug --service @/conf/hypergate-services $ipv6
+    
+    echo "Provider container hypergate_${name}_provider is ready"
+
+}
+
+
+# Connect a container to the hypergate network
+function hypergate_provider_connect {
+    if [ "$1" = "" ] || [ "$2" = "" ] || [ "$3" = "" ] || [ "$4" = "" ];
+    then
+        echo "Usage: hypergate-manager provider connect <secret> <container> <container port> <gate>"
+        exit 1
+    fi
+
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+
+    container=$2
+    port=$3
+    gatePort=$4
+
+    networkName="hypergate_${name}_providernet_$container"
+    
+    # Connect container -> service provider using an user defined bridge network
+
+    # Create new network
+    ( docker network create -d bridge $networkName || true ) > /dev/null 2>&1
+
+    # Connect container to network
+    docker network connect --alias $container.hypergate $networkName $container  
+
+    # Connect service provider to network
+    (docker network connect --alias provider.hypergate $networkName hypergate_${name}_provider || true ) > /dev/null 2>&1
+
+    # Register service
+    service="$gatePort;$container.hypergate;$port"
+    echo "$service" >> "$CONFDIR/hypergate-services-$name"
+    
+    # Restart provider
+    docker restart hypergate_${name}_provider || true
+
+}
+
+# Disconnect a container from the hypergate network
+function hypergate_provider_disconnect {
+    if [ "$1" = "" ] || [ "$2" = "" ];
+    then
+        echo "Usage: hypergate-manager provider disconnect <secret> <container>"
+        exit 1
+    fi
+
+
+    secret=$1
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+    container=$2
+
+
+    # Disconnect container -> service provider and deleted user defined bridge
+    networkName="hypergate_${name}_providernet_$container"
+
+    # Disconnect container to network
+    (docker network disconnect $networkName $container || true ) > /dev/null 2>&1
+
+    # Disconnect service provider from network
+    (docker network disconnect $networkName hypergate_${name}_provider || true ) > /dev/null 2>&1
+
+    # Delete network
+    (docker network rm $networkName || true ) > /dev/null 2>&1
+
+    # Unregister service
+    if [ -f "$CONFDIR/hypergate-services-$name" ];
+    then
+        sed -i "/:$container.hypergate:/d" "$CONFDIR/hypergate-services-$name"
+    fi
+
+    # Restart provider
+    docker restart hypergate_${name}_provider || true
+}
+
+function hypergate_network_create {
+    if [ "$1" = "" ] || [ "$2" = "" ];
+    then
+        echo "Usage: hypergate-manager network create <secret> <network>"
+        exit 1
+    fi
+    secret=$1
+    docker network create -d bridge $2 || true
+}
+ 
+
+function hypergate_network_expose {
+    if [ "$1" = "" ] || [ "$2" = "" ] || [ "$3" = "" ] || [ "$4" = "" ];
+    then
+        echo "Usage: hypergate-manager network expose <secret> <network> <alias in hypergate network> <alias in docker network>"
+        echo "Usage: hypergate-manager network expose <secret> <network> auto"
+        exit 1
+    fi
+    secret=$1
+    network=$2
+    hyperaliases=$3
+    dockeralias=$4
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+    (hypergate_network_create $secret "$network"||true ) > /dev/null 2>&1
+
+    if [ "$hyperaliases" == "auto" ];
+    then
+        aliases="`docker exec hypergate_${name}_gateway bash -c \"curl -s 127.0.0.1:2375/routingTable | jq -r 'keys[]'\"`"
+        
+        accessPointContainersArray=()
+        for alias in $aliases; do
+            if [[ $alias == *.$network:* ]] || [[ $alias == *.$network/ ]] || [[ $alias == *.$network ]];
+            then
+                dockerAlias=`echo $alias | sed "s/\(.*\)\.$network:.*/\1/"`
+                dockeraliasHash=$(echo -n $dockerAlias | sha256sum | cut -d' ' -f1  | cut -c1-12)     
+                gatewayContainerName="hypergate_${name}_networkgate_$dockeraliasHash"
+
+                if [ -z "$(docker ps -a -q -f name=$gatewayContainerName)" ];
+                then
+                    hypergate_network_expose $secret $network $dockerAlias.$network $dockerAlias
+                fi               
+
+                accessPointContainersArray+=($gatewayContainerName)
+            fi
+        done
+
+        activeContainerNamesInNetwork="`docker network inspect $network --format='{{range .Containers}}{{.Name}} {{end}}'`"
+        for containerName in $activeContainerNamesInNetwork; do
+            # if not in array and starts with hypergate_networkgate_, disconnect
+            if [[ ! " ${accessPointContainersArray[@]} " =~ " ${containerName} " ]] && [[ $containerName == hypergate_${name}_networkgate_* ]];
+            then
+                docker network disconnect $network $containerName  || true
+                docker stop $containerName || true
+                docker rm $containerName  || true
+            fi            
+        done
+        
+    else
+        
+        debug=""
+        if [ "$DEBUG" = "true" ];
+        then
+            debug="--verbose"
+        fi
+
+        ipv6=""
+        if [ "$WITH_IPV6" != "" ];
+        then
+            ipv6="--ipv6"
+        fi
+
+        dockeraliasHash=$(echo -n $dockeralias | sha256sum | cut -d' ' -f1  | cut -c1-12)     
+        (docker stop hypergate_${name}_networkgate_$dockeraliasHash || true) > /dev/null 2>&1
+        (docker rm hypergate_${name}_networkgate_$dockeraliasHash || true) > /dev/null 2>&1
+
+        providerToGatewayNetwork="hypergate_${name}_providertogateway_network"
+
+        docker run -d --restart=always --tmpfs /tmp \
+         --network $providerToGatewayNetwork \
+        --read-only --name hypergate_${name}_networkgate_$dockeraliasHash \
+        $DOCKER_IMAGE --gateway $secret $debug  --listen 0.0.0.0 --allowGates $hyperaliases $ipv6
+        echo "Gateway to $hyperaliases created"
+
+        docker network connect --alias $dockeralias $network hypergate_${name}_networkgate_$dockeraliasHash
+        echo "Gateway connected hypergate_${name}_networkgate_$dockeraliasHash to $network"
+    fi
+}
+
+
+function hypergate_network_unexpose {
+    if [ "$1" = "" ] || [ "$2" = "" ] || [ "$3" = "" ];
+    then
+        echo "Usage: hypergate-manager network unexpose <secret> <network> <alias in docker network>"
+        exit 1
+    fi
+    secret=$1
+    network=$2
+    dockeralias=$3
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+    dockeraliasHash=$(echo -n $dockeralias | sha256sum | cut -d' ' -f1  | cut -c1-12)     
+    docker stop hypergate_${name}_networkgate_$dockeraliasHash||true
+    docker rm hypergate_${name}_networkgate_$dockeraliasHash||true
+    echo "Gateway to $network destroyed"
+}
+
+
+function hypergate_network_connect {
+    if [ "$1" = "" ] || [ "$2" = "" ] || [ "$3" = "" ] || [ "$4" = "" ];
+    then
+        echo "Usage: hypergate-manager network connect <secret> <network> <container> <port> <alias in docker network>"
+        echo "Usage: hypergate-manager network connect <secret> <network> <container> <port>"
+        exit 1
+    fi
+    secret=$1
+    network=$2
+    container=$3
+    port=$4
+    alias=$5
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+    (hypergate_network_create $secret "$network"||true ) > /dev/null 2>&1
+    
+    if [ "$alias" == "" ];
+    then
+        alias="$container"
+    fi
+
+	hypergate_provider_connect "$secret" "$container" "$port" "${alias}.${network}:${port}"
+    hypergate_network_expose "$secret" "$network" "${alias}.${network}" "$alias"
+
+    # Connect container to hypergate
+    docker network connect  $network $container
+}    
+
+
+function hypergate_network_disconnect {
+    if [ "$1" = "" ] || [ "$2" = "" ] || [ "$3" = "" ];
+    then
+        echo "Usage: hypergate-manager network disconnect <secret> <network> <container> <alias in docker network>"
+        echo "Usage: hypergate-manager network disconnect <secret> <network> <container>"
+        exit 1
+    fi
+    secret=$1
+    network=$2
+    container=$3
+    dockeralias=$4
+    hypergate_utils_checkSecret $secret
+    name=$(hypergate_utils_getName $secret)
+    if [ "$dockeralias" == "" ];
+    then
+        dockeralias="$container"
+    fi
+    hypergate_network_unexpose $secret $network $dockeralias
+    hypergate_provider_disconnect $secret $container
+    # docker network disconnect $network $container
+    
+    # Disconnect container to hypergate
+    docker network disconnect $network $container
+}    
+
+
+
+
+
+function help {
+    echo "
+    
+    Create a network secret
+        hypergate-manager utils newSecret
+
+    Install HyperGate    
+        hypergate-manager utils install <network secret>
+
+    Uninstall HyperGate
+        hypergate-manager utils uninstall <network secret>
+
+    Expose ports on the gateway
+        hypergate-manager gateway expose <network secret> <port1/tcp,port2/tcp,port3/udp,...>
+        hypergate-manager gateway expose <network secret> auto
+
+    Block ports on the gateway
+        hypergate-manager gateway unexpose <network secret> <port1/tcp,port2/tcp,...>
+    
+    Connect a container to the hypergate network
+        hypergate-manager provider connect <network secret> <container> <container_port[/tcp]> <gateway port>
+        hypergate-manager provider connect <network secret> <container> <container_port[/udp]> <gateway port>
+
+    Disconnect a container from the hypergate network
+        hypergate-manager provider disconnect <network secret> <container>
+
+    Create docker network
+        hypergate-manager network create <network secret> <network name>
+
+    Connect container to docker network
+        hypergate-manager network connect <network secret> <network name> <container> <container port> <alias in docker network>
+        hypergate-manager network connect <network secret> <network name> <container> <container port>
+    
+    Disconnect container from docker network
+        hypergate-manager network disconnect <network secret> <network name> <container> <alias in docker network>
+        hypergate-manager network disconnect <network secret> <network name> <container>
+    
+    Expose remote containers in docker network
+        hypergate-manager network expose <secret> <network> <alias in hypergate network> <alias in docker network>
+        hypergate-manager network expose <network secret> <network name> auto
+    
+
+    - To enable binding of IPv6 interfaces, set the environment variable WITH_IPV6 to true
+            Note: This is usually not needed and seems to be broken/unsupported in the default docker installation 
+    - To enable VERBOSE loggin export DEBUG=true as env variable
+    - To change config directory export CONFDIR=/path/to/config/dir
+    - To change docker image export DOCKER_IMAGE=hypergate/hypergate:latest
+"
+}
+
+hypergate_$1_$2 ${@:3} || help

@@ -1,0 +1,69 @@
+
+name: Build
+
+on:
+  release:
+    types: [published]
+  push:
+
+jobs:
+  buildAndDeploy:
+      runs-on: ubuntu-latest
+      container:      
+        image: 'runmymind/docker-android-sdk:ubuntu-standalone'
+      steps:
+      - uses: actions/checkout@v2 
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v3.6.0
+        with:
+          node-version: 16.x
+                
+      - name: Install dependencies
+        run: |
+          apt update
+          apt install -y gnupg
+
+      - name: Build
+        run: |         
+          export VERSION="`if [[ $GITHUB_REF == refs\/tags* ]]; then echo ${GITHUB_REF//refs\/tags\//}; fi`"
+          if [ "$VERSION" = "" ];
+          then
+            export VERSION="SNAPSHOT"
+          fi
+          bash build.sh
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: hypergate
+          path: deploy
+      
+      - name: Upload hypergate binary
+        if: github.event_name == 'release'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: deploy/hypergate
+          asset_name: hypergate
+          tag: ${{ github.ref }}
+          overwrite: true
+
+      - name: Upload hypergate hash
+        if: github.event_name == 'release'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: deploy/hypergate.sha256
+          asset_name: hypergate.sha256
+          tag: ${{ github.ref }}
+          overwrite: true
+
+      - name: Push to registry
+        run: |
+          TAG="snapshot"
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}
+          fi
+          docker tag hypergate:$TAG docker.pkg.github.com/${{ github.repository }}/hypergate:${TAG}
+          docker push docker.pkg.github.com/${{ github.repository }}/hypergate:${TAG}

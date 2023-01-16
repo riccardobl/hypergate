@@ -1,0 +1,18 @@
+version: 1
+
+AppDir:
+  path: ./AppDir
+
+  app_info:
+    id: hypergate
+    name: HyperGate
+    icon: application-vnd.appimage
+    version: "$VERSION"
+    exec: node/bin/node
+    exec_args: $APPDIR/hypergate-cli.js $@
+     
+
+AppImage:
+  update-information: None
+  sign-key: None
+  arch: "x86_64"
