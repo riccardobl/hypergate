@@ -350,7 +350,7 @@ function hypergate_network_create {
  
 
 function hypergate_network_expose {
-    if [ "$1" = "" ] || [ "$2" = "" ] || [ "$3" = "" ] || [ "$4" = "" ];
+    if [ "$1" = "" ] || [ "$2" = "" ] || [ "$3" = "" ] ;
     then
         echo "Usage: hypergate-manager network expose <secret> <network> <alias in hypergate network> <alias in docker network>"
         echo "Usage: hypergate-manager network expose <secret> <network> auto"
@@ -360,6 +360,10 @@ function hypergate_network_expose {
     network=$2
     hyperaliases=$3
     dockeralias=$4
+    if [ "$dockeralias" = "" ];
+    then
+        dockeralias=$hyperaliases
+    fi
     hypergate_utils_checkSecret $secret
     name=$(hypergate_utils_getName $secret)
     (hypergate_network_create $secret "$network"||true ) > /dev/null 2>&1
