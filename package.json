@@ -22,5 +22,8 @@
     "url": "https://github.com/riccardobl/hypergate/issues"
   },
   "homepage": "https://github.com/riccardobl/hypergate",
-  "type": "module"
+  "type": "module",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
 }

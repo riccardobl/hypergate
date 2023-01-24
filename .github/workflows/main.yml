@@ -7,10 +7,11 @@ on:
   push:
 
 jobs:
-  buildAndDeploy:
+  BuildBinary:
       runs-on: ubuntu-latest
-      container:      
-        image: 'runmymind/docker-android-sdk:ubuntu-standalone'
+      permissions:
+        contents: read
+        packages: write
       steps:
       - uses: actions/checkout@v2 
 
@@ -18,11 +19,11 @@ jobs:
         uses: actions/setup-node@v3.6.0
         with:
           node-version: 16.x
-                
+
       - name: Install dependencies
         run: |
-          apt update
-          apt install -y gnupg
+          sudo apt update
+          sudo apt install -y jq
 
       - name: Build
         run: |         
@@ -32,7 +33,7 @@ jobs:
             export VERSION="SNAPSHOT"
           fi
           bash build.sh
-      
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
@@ -58,12 +59,59 @@ jobs:
           asset_name: hypergate.sha256
           tag: ${{ github.ref }}
           overwrite: true
-
-      - name: Push to registry
+    
+  BuildContainer:
+      runs-on: ubuntu-latest
+      permissions:
+        contents: read
+        packages: write
+      steps:  
+      - uses: actions/checkout@v2 
+      - name: Install dependencies
         run: |
-          TAG="snapshot"
+          sudo apt update
+          sudo apt install -y jq
+      - name: Build and push to registry
+        run: |
+          VERSION="snapshot"
           if [[ $GITHUB_REF == refs/tags/* ]]; then
-            TAG=${GITHUB_REF#refs/tags/}
+            VERSION=${GITHUB_REF#refs/tags/}
           fi
-          docker tag hypergate:$TAG docker.pkg.github.com/${{ github.repository }}/hypergate:${TAG}
-          docker push docker.pkg.github.com/${{ github.repository }}/hypergate:${TAG}
+          bash setversion.sh
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
+          docker build -t hypergate:$VERSION . -f docker/Dockerfile
+          docker tag hypergate:$VERSION docker.pkg.github.com/${{ github.repository }}/hypergate:${VERSION}
+          docker push docker.pkg.github.com/${{ github.repository }}/hypergate:${VERSION}
+
+  # BuildWithNPM:
+  #     runs-on: ubuntu-latest
+  #     permissions:
+  #       contents: read
+  #       packages: write
+  #     steps:
+  #     - uses: actions/checkout@v2 
+  #     - name: Setup Node.js environment
+  #       uses: actions/setup-node@v3.6.0
+  #       with:
+  #         node-version: 16.x
+  #         registry-url: 'https://npm.pkg.github.com'
+  #     - name: Install dependencies
+  #       run: |
+  #         sudo apt update
+  #         sudo apt install -y jq
+  #     - name: Build
+  #       run: |
+  #           VERSION="snapshot"
+  #           if [[ $GITHUB_REF == refs/tags/* ]]; then
+  #             VERSION=${GITHUB_REF#refs/tags/}
+  #           fi    
+  #           bash setversion.sh     
+  #           npm install --production
+  #     - name: Publish
+  #       run: |
+  #         echo @lexacode:https://npm.pkg.github.com/ > .npmrc
+  #         echo '//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}' >> .npmrc
+  #         npm publish
+        
+        
+      

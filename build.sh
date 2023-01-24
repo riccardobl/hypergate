@@ -5,6 +5,8 @@ then
     VERSION=1.0
 fi
 
+bash setversion.sh
+
 rm -Rf build || true
 mkdir -p deploy
 mkdir -p build/AppDir
