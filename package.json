@@ -1,6 +1,6 @@
 {
   "name": "hypergate",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "TCP and UDP gateway and reverse proxy built on top of hyperswarm",
   "main": "hypergate-cli.js",
   "dependencies": {
