@@ -9,11 +9,11 @@ It consists of three main components:
 
 An hypergate network can have multiple Gateways and Service Providers, even on the same machines. 
 
-**If you want to tl;dr directly to the examples, just jump to [Example: Providers Gateways](#Example-1:-One-Provider,-One-Gateway-with-Docker) or  [Example: Docker Network](#Example-2:-Docker-Virtual-Network)**
+**If you want to tl;dr directly to the examples, just jump to [Example: Providers-Gateways](#example-1-one-provider-one-gateway-with-docker) or  [Example: Docker Network](#example-2-docker-virtual-network)**
 
 
 
-# Usage - Short explanation
+# Usage and Short explanation
 There are two main ways to use Hypergate: 
 
 - **Providers-Gateways logic**: This can be done using Docker containers with the help of the hypergate-manager helper script, which will build one provider container and one gateway container for the host machine.
@@ -30,25 +30,18 @@ The only things you need to get started are:
     - [jq](https://stedolan.github.io/jq/) required by hypergate-manager to parse json data from docker (it is available in most package managers, eg. `apt install jq` on ubuntu)
 
 - If you want to use Hypergate without docker:
-    - The "hypergate" command line utility from this repo installed with npm or the "hypergate" executable downloaded from the release page
+    - [NodeJS](https://nodejs.org/en/) 
+    - The "hypergate" command line utility from this repo installed with npm (`npm i https://github.com/riccardobl/hypergate.git`) 
+    
+    or 
+    
+    - The "hypergate" executable downloaded from the [release page](https://github.com/riccardobl/hypergate/releases). This is a self contained app image that contains the nodejs runtime environment, so you don't need to install nodejs separately. *(Works only on x86_64 linux machines)*
     
 # Service Providers-Gateways
  
- <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;">
-<figure>
-    <a href="static/gateway-provider.jpg" target="blank">
-        <img src="static/gateway-provider.jpg" style="border-radius:10px;max-width:300px"  >
-        <figcaption>One Provider, One Gateway configuration</figcaption>
-    </a>
-</figure>
-
-<figure>
-    <a href="static/multi-gateway-provider.jpg" target="blank">
-        <img src="static/multi-gateway-provider.jpg" style="border-radius:10px;max-width:550px"  >
-        <figcaption>Many Providers, Many Gateways configuration</figcaption>
-    </a>
-</figure>
-</div>
+| One Provider, One Gateway configuration  | Many Providers, Many Gateways configuration |
+| ------------- | ------------- |
+| <a href="static/gateway-provider.jpg" target="blank"><img src="static/gateway-provider.jpg"   ></a>        |<a href="static/multi-gateway-provider.jpg" target="blank"><img src="static/multi-gateway-provider.jpg"   > </a> |
 
 Service Providers are authoritative and are responsible for informing the Gateways of the services they expose by updating their routing table. Gateways are expected to always trust them.
 Service Providers advertise their exposed services by specifying ports or providing aliases, both of which are called "gates." 
@@ -69,14 +62,9 @@ It is recommended to use multiple Hypergate Networks to isolate services if diff
 
 
 # Docker virtual network
- <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;">
-<figure>
-    <a href="static/gateway-provider.jpg" target="blank">
-        <img src="static/virtual-network.jpg" style="border-radius:10px;max-width:400px"  >
-        <figcaption>Docker virtual network</figcaption>
-    </a>
-</figure>
-</div>
+| Docker virtual network | 
+| ------------- | 
+| <a href="static/gateway-provider.jpg" target="blank"> <img src="static/virtual-network.jpg" width=300px > </a>|
 
 The **Hypergate Manager** seamlessly connects all containers on the same network by utilizing **service providers**, **gateways,** and **Docker's user-defined bridge** networks, eliminating the need for complex configuration or port redirects. Utilizing the power of Hyperswarm, Hypergate creates P2P connections through NATs using hole-punching techniques, even for containers that would otherwise be inaccessible. All connections are automatically encrypted for added security.
 
@@ -91,7 +79,7 @@ We will use docker containers and the helper script hypergate-manager, however t
 
 ### Create Hypergate Network Secret
 First we need the network secret, this is a random  32-byte hex string that will be used to identify the network. It is shared between all the machines that will be part of the network.
-One quick way to generate it is securely is by using openssl or the hypergate-manager helper script.
+One quick way to generate it securely is by using openssl or the hypergate-manager helper script.
 
 
 ```bash
@@ -100,6 +88,13 @@ openssl rand -hex 32
 hypergate-manager utils newSecret 
 # Result: aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648
 ```
+
+### Machine 1: Install hypergate-manager
+```bash
+curl "https://raw.githubusercontent.com/riccardobl/hypergate/master/docker/hypergate-manager" -o /usr/local/bin/hypergate-manager
+chmod +x /usr/local/bin/hypergate-manager
+```
+
 
 ### Machine 1: Join the hypergate network 
 This will create a local gateway and local provider container to interface with hypergate
@@ -131,6 +126,14 @@ hypergate-manager provider connect aae6437614e28a2f87b7ccacc73332c343fdfe9cf974d
 
  hypergate-manager provider connect aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648 web2 8080/tcp 8081/tcp
 ```
+
+
+### Machine 2: Install hypergate-manager
+```bash
+curl "https://raw.githubusercontent.com/riccardobl/hypergate/master/docker/hypergate-manager" -o /usr/local/bin/hypergate-manager
+chmod +x /usr/local/bin/hypergate-manager
+```
+
 
 ### Machine 2: Join the hypergate network 
 We join the hypergate network on the second machine, using the same secret
@@ -175,11 +178,11 @@ This example is much easier than the previous one, as it hides all the provider-
 
 In this example we will host a caddy reverse proxy connected to a wordpress container on MACHINE 1 that use mysql on MACHINE 2 that is also accessible from a phpmyadmin container on the same machine.
 
-All containers will be linked using aliases that ends with .hyper, eg. mysql.hyper
+All containers will be linked using aliases that end with .hyper, eg. mysql.hyper
 
 ### Create Hypergate Network Secret
 First we need the network secret, this is a random  32-byte hex string that will be used to identify the network. It is shared between all the machines that will be part of the network.
-One quick way to generate it is securely is by using openssl or the hypergate-manager helper script.
+One quick way to generate it securely is by using openssl or the hypergate-manager helper script.
 
 ```bash
 openssl rand -hex 32
@@ -188,15 +191,21 @@ hypergate-manager utils newSecret
 # Result: aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648
 ```
 
+### Machine 2: Install hypergate-manager
+```bash
+curl "https://raw.githubusercontent.com/riccardobl/hypergate/master/docker/hypergate-manager" -o /usr/local/bin/hypergate-manager
+chmod +x /usr/local/bin/hypergate-manager
+```
+
 ### Machine 2: Join the hypergate network 
 This will create a local gateway and local provider container to interface with hypergate
 ```bash
 hypergate-manager utils install aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648
 ```
 
-### Machine 2: Create the docker overlay container
+### Machine 2: Create the docker overlay network
 
-We will install hypergate  create a network called overlay, that will be used to connect the services to the hypergate network.
+We will create a network called overlay, that will bridge the hypergate network.
 
 ```bash
 hypergate-manager network create aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648 overlay
@@ -220,6 +229,11 @@ hypergate-manager network connect aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dc
 hypergate-manager network connect aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648 overlay test-phpmyadmin 80/tcp phpmyadmin.hyper
 ``` 
 
+### Machine 1: Install hypergate-manager
+```bash
+curl "https://raw.githubusercontent.com/riccardobl/hypergate/master/docker/hypergate-manager" -o /usr/local/bin/hypergate-manager
+chmod +x /usr/local/bin/hypergate-manager
+```
 
 ### Machine 1: Join the hypergate network 
 This will create a local gateway and local provider container to interface with hypergate
@@ -227,9 +241,9 @@ This will create a local gateway and local provider container to interface with 
 hypergate-manager utils install aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648
 ```
 
-### Machine 1: Create the docker overlay container
+### Machine 1: Create the docker overlay network
 
-We will install hypergate  create a network called overlay, that will be used to connect the services to the hypergate network.
+Same as machine 2, this is the network that will bridge to the hypergate network.
 
 ```bash
 hypergate-manager network create aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648 overlay
@@ -258,15 +272,15 @@ hypergate-manager network connect aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dc
 
 ### Machine 1: Expose the remote containers
 
-Now we need to sync the network and expose the remote containers, this can be done manually by calling the expose with the specified alias or manually (preferred) by calling expose with the auto parameter.
+Now we need to sync the network and expose the remote containers, this can be done manually by calling the expose with the specified alias or automatically (preferred) by calling expose with the auto parameter.
 
 ```bash
 hypergate-manager network expose aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcdee4f19611a78f6648 overlay auto
 ```
 
-Similar to when using the provider-gateway logic the gateways and providers take some time to find each others, so you might need to wait or call this command a few times before the services are accessible.
+Similar to when using the provider-gateway logic, the gateways and providers take some time to find each others, so you might need to wait or call this command a few times before the services are accessible.
 
-It is advised to add this command to a cronjob or a systemd timer to keep the network up to date.
+*It is advised to add this command to a cronjob or a systemd timer to keep the network up to date.*
 
 ### Machine 2: Expose the remote containers
 Same but  on machine 2
@@ -278,3 +292,22 @@ hypergate-manager network expose aae6437614e28a2f87b7ccacc73332c343fdfe9cf974dcd
 ### Test the services
 We should be able to access the wordpress site on http://IP_MACHINE1:80 and the phpmyadmin on http://IP_MACHINE2:3307
 
+
+
+# License and Warranty
+
+This is an experimental free software, there is no warranty. You are free to use, modify and redistribute it under certain conditions. 
+
+See the [LICENSE](LICENSE) file for details.
+
+This is an experimental software, it might or might not be production ready or even work as expected. 
+
+Use it at your own discretion.
+
+# Similar projects
+Other projects related to sharing services with hyperswarm
+
+- [hypertele](https://github.com/bitfinexcom/hypertele) :  A swiss-knife proxy powered by Hyperswarm DHT 
+- [hyperseaport](https://github.com/ryanramage/hyperseaport) :  A p2p service registry 
+- [hyperssh](https://github.com/mafintosh/hyperssh) :  Run SSH over hyperswarm! 
+- [hyperbeam](https://github.com/mafintosh/hyperbeam) :  A 1-1 end-to-end encrypted internet pipe powered by Hyperswarm 
