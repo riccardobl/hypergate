@@ -94,7 +94,7 @@ function hypergate_utils_uninstall {
 
 
 function hypergate_gateway_create  {    
-    if [ "$1" = "" ] || [ "$2" = "" ]; 
+    if [ "$1" = "" ]  ; 
     then
         echo "Usage: hypergate-manager gateway create <secret> [csv ports to expose]"
         echo "Example: hypergate-manager gateway create 1234 80/tcp,443/tcp"
