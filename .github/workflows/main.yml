@@ -40,25 +40,34 @@ jobs:
           name: hypergate
           path: deploy
       
-      - name: Upload hypergate binary
+      - name: Deploy to GitHub Releases
         if: github.event_name == 'release'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: deploy/hypergate
-          asset_name: hypergate
-          tag: ${{ github.ref }}
-          overwrite: true
+        run: |
+          echo "${GITHUB_EVENT_PATH}"
+          cat ${GITHUB_EVENT_PATH}
+          releaseId=$(jq --raw-output '.release.id' ${GITHUB_EVENT_PATH})
 
-      - name: Upload hypergate hash
-        if: github.event_name == 'release'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: deploy/hypergate.sha256
-          asset_name: hypergate.sha256
-          tag: ${{ github.ref }}
-          overwrite: true
+          echo "Upload binary to $releaseId"
+          filename=deploy/hypergate
+          url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/$releaseId/assets?name=$(basename $filename)"
+          echo "Upload to $url"
+          curl -L \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Content-Type: application/octet-stream" \
+          --data-binary @"$filename" \
+          "$url"
+          
+          echo "Upload hash to $releaseId"
+          filename=deploy/hypergate.sha256
+          url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/$releaseId/assets?name=$(basename $filename)"
+          echo "Upload to $url"
+          curl -L \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Content-Type: text/plain" \
+          --data-binary @"$filename" \
+          "$url"
+          
+
     
   BuildContainer:
       runs-on: ubuntu-latest
