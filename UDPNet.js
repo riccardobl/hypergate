@@ -127,8 +127,8 @@ export default class UDPNet {
         this.localPort = port;
         this.localAddress = addr;
         this.server.on("listening", () => {
-            const address = socket.address();
-            this.localPort = address.port;
+            //const address = socket.address();
+            //this.localPort = address.port;
             this._emitEvent("listening", []);
         });
     }
