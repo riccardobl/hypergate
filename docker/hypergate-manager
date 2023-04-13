@@ -2,7 +2,7 @@
 set -e
 if [ "$DOCKER_IMAGE" = "" ];
 then
-    export DOCKER_IMAGE="ghcr.io/riccardobl/hypergate/hypergate:0.0.4"
+    export DOCKER_IMAGE="ghcr.io/riccardobl/hypergate/hypergate:0.0.5"
 fi
 if [ "$CONFDIR" = "" ];
 then
