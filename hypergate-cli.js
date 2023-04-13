@@ -4,7 +4,7 @@ import Gateway from "./Gateway.js";
 import Utils from "./Utils.js";
 import Minimist from 'minimist';
 import Fs from 'fs';
-import UDXBinding from "udx-native/lib/binding.js";
+// import UDXBinding from "udx-native/lib/binding.js";
 
 function prepareLogger(tag, debug) {
     const _console_log = console.log;
@@ -28,11 +28,11 @@ function prepareLogger(tag, debug) {
 }
 
 function disableIPv6(argv) {
-    const _udx_napi_socket_bind = UDXBinding.udx_napi_socket_bind;
-    UDXBinding.udx_napi_socket_bind = function (...args) {
-        if (args[3] == 6) throw "IPv6 is disabled"
-        return _udx_napi_socket_bind(...args);
-    }
+//     const _udx_napi_socket_bind = UDXBinding.udx_napi_socket_bind;
+//     UDXBinding.udx_napi_socket_bind = function (...args) {
+//         if (args[3] == 6) throw "IPv6 is disabled"
+//         return _udx_napi_socket_bind(...args);
+//     }
 }
 
 
