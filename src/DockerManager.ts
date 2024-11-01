@@ -28,7 +28,7 @@ export default class DockerManager {
         this.router = router;
         this.image = image ?? 'hypergate';
         this.networkName = networkName??`hypergate-${router}`;
-        this.refreshTime = refreshTime ?? 5*1000;
+        this.refreshTime = refreshTime ?? 20*1000;
         if(serviceProvider instanceof ServiceProvider){
             this.serviceProvider = serviceProvider;
         }else if(serviceProvider instanceof Gateway){
@@ -82,7 +82,6 @@ export default class DockerManager {
         for(const [host, services] of Object.entries(servicesXhost)){
             const gateContainerName=`${host}-hypergate-gateway-${router}`
             let container = containers.find((c:any)=>{
-                console.log(c.data.Names[0].substring(1), gateContainerName)
                 return c.data.Names[0].substring(1) == gateContainerName
             });
             if(!container){
