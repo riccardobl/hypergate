@@ -34,47 +34,67 @@ Options:
     --network <network name>: Docker network name
     --image <image name>: Docker image name
     --refreshTime <time in ms>: Refresh time for docker manager
+    --verbose: Verbose mode
     `);
 }
 
 function loadEnvs(argv:any){
-    if(!argv.router){
+    if(argv.router==null){
         argv.router = process.env.HYPERGATE_ROUTER;
     }
-    if(!argv.gateway){
+    if(argv.gateway==null){
         argv.gateway = process.env.HYPERGATE_GATEWAY;
+        if(argv.gateway==='true'){
+            argv.gateway = true;
+        }
     }
-    if(!argv.provider){
+    if(argv.provider==null){
         argv.provider = process.env.HYPERGATE_PROVIDER;
+        if(argv.provider==='true'){
+            argv.provider = true;
+        }
     }
-    if(!argv.docker){
+    if(argv.docker==null){
         argv.docker = process.env.HYPERGATE_DOCKER;
+        if(argv.docker === 'true'){
+            argv.docker = true;
+        }
     }
-    if(!argv.network){
+    if(argv.network==null){
         argv.network = process.env.HYPERGATE_NETWORK;
     }
-    if(!argv.image){
+    if(argv.image==null){
         argv.image = process.env.HYPERGATE_IMAGE;
     }
-    if(!argv.refreshTime){
+    if(argv.refreshTime==null){
         argv.refreshTime = process.env.HYPERGATE_REFRESH_TIME;
     }
-    if(!argv.exposeOnlyPublished){
+    if(argv.exposeOnlyPublished==null){
         argv.exposeOnlyPublished = process.env.HYPERGATE_EXPOSE_ONLY_PUBLISHED;
+        if(argv.exposeOnlyPublished === 'true'){
+            argv.exposeOnlyPublished = true;
+        }
     }
-    if(!argv.exposeOnlyDocker){
+    if(argv.exposeOnlyDocker==null){
         argv.exposeOnlyDocker = process.env.HYPERGATE_EXPOSE_ONLY_DOCKER;
+        if(argv.exposeOnlyDocker === 'true'){
+            argv.exposeOnlyDocker = true;
+        }
     }
-    if(!argv.exposeOnlyServices){
+    if(argv.exposeOnlyServices==null){
         argv.exposeOnlyServices = process.env.HYPERGATE_EXPOSE_ONLY_SERVICES;
     }
-    if(!argv.listen){
+    if(argv.listen==null){
         argv.listen = process.env.HYPERGATE_LISTEN;
+    }
+    if(argv.verbose==null){
+        argv.verbose = process.env.HYPERGATE_VERBOSE?.toLowerCase() === 'true';
     }
 }
 
 
 async function cli(processArgv: string[]) {
+    
  
     const ctx:any = {};
     const argv = Minimist(processArgv.slice(2));
@@ -82,6 +102,10 @@ async function cli(processArgv: string[]) {
     if (argv.help) {
         help(processArgv);
     } else {
+
+        if(!argv.verbose){
+            console.log = (...args:any[])=>{}
+        }
 
         const docker = argv.docker;
         const dockerNetwork = argv.network;
