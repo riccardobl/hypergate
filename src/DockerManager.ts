@@ -107,12 +107,14 @@ export default class DockerManager {
                         EndpointsConfig: {
                             [this.networkName]: {
                                 Aliases: [host],
+                                // @ts-ignore
                                 NetworkID: network.data.Id
                             }
                         }
                     }         
                 })
             }
+            // @ts-ignore
             if(container.data.State != 'running'){
                 await container.start()
             }
@@ -125,6 +127,7 @@ export default class DockerManager {
         const router = this.router;
         const containers = await this.docker.container.list()
         for(const container of containers){
+            // @ts-ignore
             if(container.data.Names[0].substring(1).includes(router)){
                 await container.stop()
                 await container.delete({force:true})
@@ -138,19 +141,20 @@ export default class DockerManager {
         const services:Array<Service> = []
         const containers = await this.docker.container.list()
         for(let container of containers){
+            // @ts-ignore
             const name = container.data.Names[0].substring(1)
             if(name.includes(this.router)) continue;
 
-            
+            // @ts-ignore
             const labels = container.data.Labels;
 
             if((labels['hypergate.EXCLUDE']||'false').toString().toLowerCase() == 'true') continue;
 
             const containerStatus = await container.status();
-
+            // @ts-ignore
             const network = containerStatus.data?.NetworkSettings?.Networks[networkName]
             if(!network) continue;
-
+            // @ts-ignore
             const ports = [...container.data.Ports];
         
             const customExposedPorts = (labels['hypergate.EXPOSE']??'').split(',')
@@ -176,7 +180,7 @@ export default class DockerManager {
                     ports.push({ PrivatePort:privatePort, Type:proto, PublicPort:publicPort })
                 }
             }
-            
+            // @ts-ignore
             const service = container.data.Ports.map((ps:any)=>{                
                 let servicePort = ps.PrivatePort;
                 let serviceProto = ps.Type;
