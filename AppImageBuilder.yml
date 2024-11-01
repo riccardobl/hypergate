@@ -9,7 +9,7 @@ AppDir:
     icon: application-vnd.appimage
     version: "$VERSION"
     exec: node/bin/node
-    exec_args: $APPDIR/hypergate-cli.js $@
+    exec_args: $APPDIR/cli.js $@
      
 
 AppImage:

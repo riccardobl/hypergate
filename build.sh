@@ -2,21 +2,28 @@
 set -e
 if [ "$VERSION" = "" ];
 then
-    VERSION=1.0
+    VERSION=2.0
 fi
 
 bash setversion.sh
 
 rm -Rf build || true
+rm -Rf dist || true
 mkdir -p deploy
 mkdir -p build/AppDir
+
+npm run build
+
+
+wget https://nodejs.org/dist/v18.13.0/node-v18.13.0-linux-x64.tar.xz -O build/AppDir/node.tar.xz
+tar -xf build/AppDir/node.tar.xz -C build/AppDir
+rm build/AppDir/node.tar.xz
+mv build/AppDir/node-*-linux-x64 build/AppDir/node
+
+
+cp dist/*.js build/AppDir
+cp *.json build/AppDir
 cd build/AppDir
-wget https://nodejs.org/dist/v18.13.0/node-v18.13.0-linux-x64.tar.xz -O node.tar.xz
-tar -xf node.tar.xz
-rm node.tar.xz
-mv node* node
-cp ../../*.js .
-cp ../../*.json .
 npm i --prefix=.
 
 cd ..
