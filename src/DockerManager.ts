@@ -148,8 +148,6 @@ export default class DockerManager {
 
             const customUnExposedPorts = (labels["hypergate.UNEXPOSE"] ?? "").split(",");
             // @ts-ignore
-            console.log(container.data.Ports);
-            // @ts-ignore
             const ports = [
                 // @ts-ignore
                 ...container.data.Ports.filter((p: any) => {
@@ -194,7 +192,7 @@ export default class DockerManager {
                 }
             }
             // @ts-ignore
-            const service = container.data.Ports.map((ps: any) => {
+            const service = ports.map((ps: any) => {
                 let servicePort = ps.PrivatePort;
                 let serviceProto = ps.Type;
                 let serviceHost = network?.Aliases?.[0] ?? name;
