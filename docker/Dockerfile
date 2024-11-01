@@ -1,14 +1,19 @@
-FROM node:16
+FROM node:23
 
-RUN mkdir /app && mkdir /conf
-RUN apt update&&apt install -y nmap curl jq&& apt clean
-VOLUME /conf
+RUN mkdir -p /app
 WORKDIR /app
 
-ADD *.js /app/
-ADD *.json /app/
-RUN chown -R node:node /app&&chown -R node:node /conf
-USER node
-RUN cd /app && npm install --production
+COPY src ./src
+COPY package*.json ./
+COPY tsconfig.json ./
 
-ENTRYPOINT [ "node","/app/hypergate-cli.js" ]
+RUN chown -R node:node /app
+
+USER node
+RUN ls /app
+RUN npm i
+RUN npm run build
+
+LABEL hypergate.EXCLUDE="true"
+
+ENTRYPOINT [ "npm", "run", "start" , "--" ]

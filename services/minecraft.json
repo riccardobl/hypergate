@@ -1,0 +1,24 @@
+{
+    "name": "Minecraft Server",
+    "icon": "",
+    "services": [
+        { 
+            "gatePort": 25565,
+            "serviceHost": "localhost",
+            "servicePort": 25565,
+            "protocol": "tcp"
+        },
+        { 
+            "gatePort": 19132,
+            "serviceHost": "localhost",
+            "servicePort": 19132,
+            "protocol": "udp"
+        },
+        { 
+            "gatePort": 8123,
+            "serviceHost": "localhost",
+            "servicePort": 8123,
+            "protocol": "tcp"
+        }
+    ]
+}

@@ -1,0 +1,12 @@
+{
+    "name": "HTTP Server",
+    "icon": "",
+    "services": [
+        { 
+            "gatePort": 8080,
+            "serviceHost": "localhost",
+            "servicePort": 8080,
+            "protocol": "tcp"
+        }        
+    ]
+}

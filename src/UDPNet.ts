@@ -4,7 +4,21 @@ import Dgram from 'dgram';
  * Simple and incomplete wrapper around dgram to make it look like Net
  */
 export default class UDPNet {
-    static createServer(onConnection) {
+    private server: Dgram.Socket;
+    private isServer: boolean;
+    private isCloseable: boolean;
+    private events: {[key: string]: Array<Function>} = {}
+    private connections: {[key: string]: UDPNet} = {}
+    // private channelId: number;
+    public remotePort: number = 0;
+    public remoteAddress: string = "";
+    public localPort: number = 0;
+    public localAddress: string = "";
+    public isClosed: boolean = false;
+    private onConnection: Function|null = null;
+
+    
+    static createServer(onConnection: Function) : UDPNet {
         const server = new UDPNet(Dgram.createSocket("udp4"));
         server.onConnection = onConnection;
         server.isServer = true;
@@ -12,22 +26,18 @@ export default class UDPNet {
         return server;
     }
 
-    static connect(options) {
+    static connect(options: { host: string, port: number }) : UDPNet {
         const { host, port } = options;
-        const s = new UDPNet(Dgram.createSocket("udp4"));
-        s.isServer = false;
-        s.isCloseable = true;
+        const s = new UDPNet(Dgram.createSocket("udp4"), false, true);
         s.connect(port, host);
         return s;
     }
 
-    constructor(server) {
+    constructor(server: Dgram.Socket, isServer=true, isCloseable=true) {
         this.server = server;
+        this.isServer = isServer;
+        this.isCloseable = isCloseable;
 
-
-        this.events = {};
-        this.connections = {};
-        this.channelId = 0;
 
         this.server.on("message", (data, info) => {
             const key = info.address + ":" + info.port;
@@ -42,14 +52,11 @@ export default class UDPNet {
                     conn.localAddress = this.localAddress;
                     conn.isCloseable = false;
                     this.connections[key] = conn;
-                    this.onConnection(conn);
-
+                    if(this.onConnection) this.onConnection(conn);
                 }
-
-                conn._emitEvent("data", [data]);
-
+                conn.emitEvent("data", [data]);
             } else {
-                this._emitEvent("data", [data]);
+                this.emitEvent("data", [data]);
             }
         });
 
@@ -57,63 +64,63 @@ export default class UDPNet {
             for (const c of Object.values(this.connections)) {
                 c.close();
             }
-            this._emitEvent("close", []);
-            this.closed = true;
+            this.emitEvent("close", []);
+            this.isClosed = true;
         });
 
 
         this.server.on("error", async (err) => {
             for (const c of Object.values(this.connections)) {
-                c._emitEvent("error", [err]);
+                c.emitEvent("error", [err]);
             }
-            this._emitEvent("error", [err]);
+            this.emitEvent("error", [err]);
         });
 
     }
 
-    connect(port, host) {
+    public connect(port:number, host:string) : void {
         if (this.isServer) throw new Error("This socket is not connectable");
         this.remotePort = port;
         this.remoteAddress = host;
         this.server.connect(port, host);
     }
 
-    close() {
-        this.closed = true;
+    public close() : void {
+        this.isClosed = true;
         if (this.isCloseable) {
-            if (!this.closed) {
+            if (!this.isClosed) {
                 this.server.close();
-                this._emitEvent("close", []);
-                this.closed();
+                this.emitEvent("close", []);
+                this.close();
             }
         } else {
             const key = this.remoteAddress + ":" + this.remotePort;
             const conn = this.connections[key];
             if (conn) {
-                conn._emitEvent("close", []);
+                conn.emitEvent("close", []);
                 delete this.connections[key];
             }
         }
 
     }
 
-    end() {
+    public end() : void {
         this.close();
     }
 
-    write(data) {
+    public write(data: Buffer) : void {
         if (this.isServer) throw new Error("This socket is not writable");
         this.server.send(data, this.remotePort, this.remoteAddress);
 
     }
 
 
-    on(event, cb) {
+    public on(event:string, cb:Function) : void {
         if (!this.events[event]) this.events[event] = [];
         this.events[event].push(cb);
     }
 
-    _emitEvent(event, payload) {
+    private emitEvent(event:string, payload:Array<any>) : void {
         const listeners = this.events[event];
         if (!listeners) return;
         for (const l of listeners) {
@@ -121,23 +128,24 @@ export default class UDPNet {
         }
     }
 
-    listen(port, addr) {
+    public listen(port:number, addr:string, dataListener?: (data: Buffer) => void) : void {
         if (!this.isServer) throw new Error("Can't listen on this socket!");
         this.server.bind(port, addr);
         this.localPort = port;
         this.localAddress = addr;
         this.server.on("listening", () => {
-            const address = socket.address();
+            const address = this.server.address();
             this.localPort = address.port;
-            this._emitEvent("listening", []);
+            this.emitEvent("listening", []);
         });
+        if (dataListener) this.on("data", dataListener);
+
     }
 
-    address() {
+    public address() : { port: number, address: string } {
         return {
             port: this.localPort,
             address: this.localAddress
         }
-
     }
 }
