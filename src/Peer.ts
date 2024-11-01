@@ -1,80 +1,76 @@
 import Message from "./Message.js";
 // @ts-ignore
-import HyperDHT from '@hyperswarm/dht';
+import HyperDHT from "@hyperswarm/dht";
 // @ts-ignore
-import Hyperswarm from 'hyperswarm';
+import Hyperswarm from "hyperswarm";
 // @ts-ignore
-import Sodium from 'sodium-universal';
+import Sodium from "sodium-universal";
 // @ts-ignore
-import b4a from 'b4a';
-import { MessageActions,MessageContent } from "./Message.js";
+import b4a from "b4a";
+import { MessageActions, MessageContent } from "./Message.js";
 import UDPNet from "./UDPNet.js";
-import Net from 'net';
-
+import Net from "net";
 
 export type PeerChannel = {
-    socket:UDPNet|Net.Socket;
-    duration:number;
-    expire:number;
-    gatePort:number;
-    alive:boolean;
-    route:Buffer;
-    channelPort:number;
-    service:any;
-}
-
+    socket: UDPNet | Net.Socket;
+    duration: number;
+    expire: number;
+    gatePort: number;
+    alive: boolean;
+    route: Buffer;
+    channelPort: number;
+    service: any;
+};
 
 export type AuthorizedPeer = {
-    c: any,
-    info: any,
+    c: any;
+    info: any;
     channels: { [channelPort: number]: PeerChannel };
-
-}
-
+};
 
 export default class Peer {
     private isGate: boolean;
     private routerKeys: any;
     private dht: any;
-    private swarm:any ;
+    private swarm: any;
     private discovery: any;
     private stopped: boolean = false;
-    private messageHandlers: ((peer:AuthorizedPeer, msg:MessageContent) => boolean)[] = [];
-    private _authorizedPeers: AuthorizedPeer[] =[]
+    private messageHandlers: ((peer: AuthorizedPeer, msg: MessageContent) => boolean)[] = [];
+    private _authorizedPeers: AuthorizedPeer[] = [];
     private refreshing: boolean = false;
 
-    constructor(secret:string, isGate:boolean, opts?:{}) {
+    constructor(secret: string, isGate: boolean, opts?: {}) {
         this.isGate = isGate;
 
         this.routerKeys = HyperDHT.keyPair(Buffer.from(secret, "hex"));
 
         this.dht = new HyperDHT(opts);
-        this.dht.on("error", (err:any) => console.log("DHT error", err));
+        this.dht.on("error", (err: any) => console.log("DHT error", err));
         this.swarm = new Hyperswarm(this.dht);
-        this.swarm.on("error", (err:any) => console.log("Swarm error", err));
-        this.swarm.on("connection", (c:any, peer:any) => {
+        this.swarm.on("error", (err: any) => console.log("Swarm error", err));
+        this.swarm.on("connection", (c: any, peer: any) => {
             console.log("Swarm connection", b4a.toString(peer.publicKey, "hex"));
             this.onConnection(c, peer);
         });
 
-        this.discovery = this.swarm.join(this.routerKeys.publicKey, { client: true, server: true });
-        console.info('Joined router:', b4a.toString(this.routerKeys.publicKey, 'hex'))
+        this.discovery = this.swarm.join(this.routerKeys.publicKey, {
+            client: true,
+            server: true,
+        });
+        console.info("Joined router:", b4a.toString(this.routerKeys.publicKey, "hex"));
     }
 
-  
-
-
-    private addAuthorizedPeer(connection:any, peerInfo:any) : AuthorizedPeer {
+    private addAuthorizedPeer(connection: any, peerInfo: any): AuthorizedPeer {
         const newPeer = {
             c: connection,
             info: peerInfo,
-            channels: {}
-        }
+            channels: {},
+        };
         this._authorizedPeers.push(newPeer);
         return newPeer;
     }
 
-    private removeAuthorizedPeerByKey(peerKey:string) {
+    private removeAuthorizedPeerByKey(peerKey: string) {
         for (let i = 0; i < this._authorizedPeers.length; i++) {
             const peer = this._authorizedPeers[i];
             if (peer.info.publicKey.equals(peerKey)) {
@@ -84,21 +80,20 @@ export default class Peer {
         }
     }
 
-    private getAuthorizedPeerByKey(peerKey:Buffer) : AuthorizedPeer|undefined {
+    private getAuthorizedPeerByKey(peerKey: Buffer): AuthorizedPeer | undefined {
         for (const peer of this._authorizedPeers) {
             if (peer.info.publicKey.equals(peerKey)) return peer;
         }
         return undefined;
     }
 
-
-    private createAuthBlob(routerSecret:Buffer, sourcePublic:Buffer, targetPublic:Buffer, routerPublic:Buffer, timestamp:number) : Buffer {
+    private createAuthBlob(routerSecret: Buffer, sourcePublic: Buffer, targetPublic: Buffer, routerPublic: Buffer, timestamp: number): Buffer {
         if (!routerSecret || !sourcePublic || !targetPublic || !routerPublic || !timestamp) throw new Error("Invalid authkey");
         const timestampBuffer = Buffer.alloc(1 + 8);
         timestampBuffer.writeUint8(21, 0);
         timestampBuffer.writeBigInt64BE(BigInt(timestamp), 1);
 
-        const createKey = (source:Buffer) : Buffer => {
+        const createKey = (source: Buffer): Buffer => {
             const keyLength = Sodium.crypto_pwhash_BYTES_MAX < Sodium.crypto_generichash_KEYBYTES_MAX ? Sodium.crypto_pwhash_BYTES_MAX : Sodium.crypto_generichash_KEYBYTES_MAX;
             if (keyLength < Sodium.crypto_pwhash_BYTES_MIN) throw new Error("Error. Key too short");
 
@@ -111,14 +106,14 @@ export default class Peer {
             // console.log("Create key",b4a.toString(secretKey,"hex"));
 
             return secretKey;
-        }
+        };
 
-        const hash = (msg:Buffer, key:Buffer) => {
+        const hash = (msg: Buffer, key: Buffer) => {
             const enc = b4a.alloc(Sodium.crypto_generichash_BYTES_MAX);
             Sodium.crypto_generichash(enc, msg, key);
             // console.log("Create hash",b4a.toString(enc,"hex"),"Using key",b4a.toString(key,"hex"));
             return enc;
-        }
+        };
 
         const authMsg = Buffer.concat([sourcePublic, targetPublic, routerPublic, timestampBuffer]);
 
@@ -128,19 +123,18 @@ export default class Peer {
         const encAuthMsg = hash(authMsg, key);
         if (!encAuthMsg) throw new Error("Error");
 
-
         const out = Buffer.concat([timestampBuffer, encAuthMsg]);
         if (out.length < 32) throw new Error("Invalid authkey");
 
         return out;
     }
 
-    private getAuthKey(targetPublicKey:Buffer) : Buffer {
+    private getAuthKey(targetPublicKey: Buffer): Buffer {
         const sourcePublicKey = this.swarm.keyPair.publicKey;
         return this.createAuthBlob(this.routerKeys.secretKey, sourcePublicKey, targetPublicKey, this.routerKeys.publicKey, Date.now());
     }
 
-    private verifyAuthKey(sourcePublicKey:Buffer, authKey:Buffer) {
+    private verifyAuthKey(sourcePublicKey: Buffer, authKey: Buffer) {
         const timestampBuffer = authKey.slice(0, 8 + 1);
         const timestamp = timestampBuffer.readBigInt64BE(1);
         const now = BigInt(Date.now());
@@ -151,11 +145,9 @@ export default class Peer {
         const targetPublicKey = this.swarm.keyPair.publicKey;
         const validAuthMessage = this.createAuthBlob(this.routerKeys.secretKey, sourcePublicKey, targetPublicKey, this.routerKeys.publicKey, Number(timestamp));
         return validAuthMessage.equals(authKey);
-
     }
 
-    private async onConnection(c:any, peer:any) {
-
+    private async onConnection(c: any, peer: any) {
         const closeConn = () => {
             const aPeer = this.getAuthorizedPeerByKey(peer.publicKey);
             try {
@@ -169,8 +161,8 @@ export default class Peer {
             this.removeAuthorizedPeerByKey(peer.publicKey);
         };
 
-        c.on("error", (err:any) => {
-            console.log("Connection error", err)
+        c.on("error", (err: any) => {
+            console.log("Connection error", err);
             closeConn();
         });
 
@@ -178,7 +170,7 @@ export default class Peer {
             closeConn();
         });
 
-        c.on('data', (data:Buffer) => {
+        c.on("data", (data: Buffer) => {
             try {
                 const msg = Message.parse(data);
                 if (msg.actionId == MessageActions.hello) {
@@ -206,8 +198,6 @@ export default class Peer {
 
                     this.addAuthorizedPeer(c, peer);
                     console.info("Authorized", b4a.toString(peer.publicKey, "hex"));
-
-
                 } else {
                     const aPeer = this.getAuthorizedPeerByKey(peer.publicKey);
                     if (!aPeer) {
@@ -220,25 +210,26 @@ export default class Peer {
             } catch (err) {
                 console.error("Error on message", err);
             }
-
         });
 
         const authKey = this.getAuthKey(peer.publicKey);
         // console.log("Attempt authorization with authKey",b4a.toString(authKey,"hex"));
-        c.write(Message.create(MessageActions.hello, {
-            auth: authKey,
-            isGate: this.isGate
-        }));
+        c.write(
+            Message.create(MessageActions.hello, {
+                auth: authKey,
+                isGate: this.isGate,
+            }),
+        );
     }
 
-    public async broadcast(msg:Buffer) {
+    public async broadcast(msg: Buffer) {
         if (!this._authorizedPeers) return;
         for (const p of this._authorizedPeers) {
-            this.send(p.info.publicKey, msg)
+            this.send(p.info.publicKey, msg);
         }
     }
 
-    public async send(peerKey:Buffer, msg:Buffer) {
+    public async send(peerKey: Buffer, msg: Buffer) {
         console.log("Sending message to", b4a.toString(peerKey, "hex"));
         const peer = this.getAuthorizedPeerByKey(peerKey);
 
@@ -246,16 +237,17 @@ export default class Peer {
         else console.error("Peer not found");
     }
 
-    public addMessageHandler(handler:(peer:AuthorizedPeer, msg:MessageContent) => boolean) {
+    public addMessageHandler(handler: (peer: AuthorizedPeer, msg: MessageContent) => boolean) {
         this.messageHandlers.push(handler);
     }
 
-    protected async onAuthorizedMessage(peer:AuthorizedPeer, msg:MessageContent) {
+    protected async onAuthorizedMessage(peer: AuthorizedPeer, msg: MessageContent) {
         console.log("Receiving message", msg);
         for (let i = 0; i < this.messageHandlers.length; i++) {
             const handler = this.messageHandlers[i];
             try {
-                if (handler(peer, msg)) {// remove
+                if (handler(peer, msg)) {
+                    // remove
                     this.messageHandlers.splice(i, 1);
                 }
             } catch (err) {
@@ -264,24 +256,22 @@ export default class Peer {
         }
     }
 
-
     public async refresh() {
         if (this.stopped) return;
         this.refreshing = true;
         console.log("Refreshing peers");
         await this.discovery.refresh({
             server: true,
-            client: true
+            client: true,
         });
         this.refreshing = false;
         setTimeout(() => this.refresh(), 5000);
     }
 
-
     public async stop() {
         this.stopped = true;
         while (this.refreshing) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise((resolve) => setTimeout(resolve, 100));
         }
         try {
             this.swarm.destroy();
@@ -295,5 +285,4 @@ export default class Peer {
             console.error("Error on stop", err);
         }
     }
-
 }

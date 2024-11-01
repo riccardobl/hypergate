@@ -1,11 +1,10 @@
 import Peer from "./Peer.js";
 import Message, { MessageContent } from "./Message.js";
-import Net from 'net';
-import UDPNet from './UDPNet.js';
+import Net from "net";
+import UDPNet from "./UDPNet.js";
 import { MessageActions } from "./Message.js";
 import { AuthorizedPeer } from "./Peer.js";
-import { RoutingTable,  Service } from "./Router.js";
-
+import { RoutingTable, Service } from "./Router.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
@@ -15,7 +14,6 @@ export default class ServiceProvider extends Peer {
     constructor(secret: string, opts?: {}) {
         super(secret, false, opts);
         this.refresh();
-
     }
 
     public setServices(services: Service[]): Array<Service> {
@@ -26,17 +24,11 @@ export default class ServiceProvider extends Peer {
         return this.services;
     }
 
-    public addService(gatePort: number, serviceHost: string, servicePort: number, serviceProto: string, tags?:string): Service {
-        let service = this.services.find(
-            s=>s.gatePort == gatePort 
-            && s.serviceHost == serviceHost 
-            && s.servicePort == servicePort 
-            && s.protocol == serviceProto
-            && s.tags == tags
-        )
-        if(service){
+    public addService(gatePort: number, serviceHost: string, servicePort: number, serviceProto: string, tags?: string): Service {
+        let service = this.services.find((s) => s.gatePort == gatePort && s.serviceHost == serviceHost && s.servicePort == servicePort && s.protocol == serviceProto && s.tags == tags);
+        if (service) {
             console.log("Service already exists");
-            return service
+            return service;
         }
         console.info("Register service " + gatePort + " " + serviceHost + " " + servicePort + " " + serviceProto);
         service = {
@@ -44,17 +36,15 @@ export default class ServiceProvider extends Peer {
             servicePort,
             protocol: serviceProto || "tcp",
             gatePort: gatePort,
-            tags: tags
+            tags: tags,
         };
         this.services.push(service);
         return service;
     }
 
-
     public getServices(gatePort: number) {
-        return this.services.filter(s => s.gatePort == gatePort);
+        return this.services.filter((s) => s.gatePort == gatePort);
     }
-
 
     private createRoutingTableFragment(): RoutingTable {
         const routingTable: RoutingTable = [];
@@ -63,7 +53,7 @@ export default class ServiceProvider extends Peer {
             const routingEntry = {
                 ...service,
                 routes: [],
-            }
+            };
             routingTable.push(routingEntry);
         }
         return routingTable;
@@ -78,26 +68,27 @@ export default class ServiceProvider extends Peer {
         const rfr = this.createRoutingTableFragment();
         if (rfr) {
             await this.broadcast(Message.create(MessageActions.advRoutes, { routes: rfr }));
-            console.log("Broadcast routing fragment", rfr)
+            console.log("Broadcast routing fragment", rfr);
         }
 
         this.isRefreshing = false;
     }
 
-
     protected async onAuthorizedMessage(peer: AuthorizedPeer, msg: MessageContent) {
         await super.onAuthorizedMessage(peer, msg);
         try {
-
             // close channel bidirectional
             const closeChannel = (channelPort: number) => {
                 const channel = peer.channels[channelPort];
                 if (!channel) return;
                 try {
                     if (channel.route) {
-                        this.send(channel.route, Message.create(MessageActions.close, {
-                            channelPort: channelPort
-                        }));
+                        this.send(
+                            channel.route,
+                            Message.create(MessageActions.close, {
+                                channelPort: channelPort,
+                            }),
+                        );
                     }
                 } catch (e) {
                     console.error(e);
@@ -107,27 +98,29 @@ export default class ServiceProvider extends Peer {
                 }
                 channel.alive = false;
                 delete peer.channels[channelPort];
-            }
+            };
 
             // open new channel
             if (msg.actionId == MessageActions.open) {
-
-
                 // open connection to service
                 const gatePort = msg.gatePort;
                 if (!gatePort) throw "Gate port is required";
-                const service = this.getServices(gatePort)[0]
+                const service = this.getServices(gatePort)[0];
                 if (!service) throw "Service not found " + gatePort;
                 const isUDP = service.protocol == "udp";
                 const channelPort = msg.channelPort;
-                if (channelPort==null) throw "Channel port is required";
+                if (channelPort == null) throw "Channel port is required";
 
                 // Service not found, tell peer there was an error
                 if (!service) {
                     console.error("service not found");
-                    this.send(peer.info.publicKey,
-                        Message.create(MessageActions.open,
-                            { channelPort: msg.channelPort, error: "Service " + gatePort + " not found" }));
+                    this.send(
+                        peer.info.publicKey,
+                        Message.create(MessageActions.open, {
+                            channelPort: msg.channelPort,
+                            error: "Service " + gatePort + " not found",
+                        }),
+                    );
                     // closeChannel(msg.channelPort);
                     return;
                 }
@@ -138,7 +131,7 @@ export default class ServiceProvider extends Peer {
                 const serviceConn = (isUDP ? UDPNet : Net).connect({
                     host: service.serviceHost,
                     port: service.servicePort,
-                    allowHalfOpen: true
+                    allowHalfOpen: true,
                 });
 
                 // create channel
@@ -150,19 +143,22 @@ export default class ServiceProvider extends Peer {
                     alive: true,
                     route: peer.info.publicKey,
                     channelPort: channelPort,
-                    service: service
+                    service: service,
                 };
                 peer.channels[channel.channelPort] = channel;
 
                 // pipe from service to route
-                serviceConn.on("data", data => {
+                serviceConn.on("data", (data) => {
                     // every time data is piped, reset channel expire time
                     channel.expire = Date.now() + channel.duration;
 
-                    this.send(channel.route, Message.create(MessageActions.stream, {
-                        channelPort: msg.channelPort,
-                        data: data
-                    }));
+                    this.send(
+                        channel.route,
+                        Message.create(MessageActions.stream, {
+                            channelPort: msg.channelPort,
+                            data: data,
+                        }),
+                    );
                 });
 
                 const timeout = () => {
@@ -179,7 +175,6 @@ export default class ServiceProvider extends Peer {
                 };
                 timeout();
 
-
                 serviceConn.on("error", (err) => {
                     console.error(err);
                     closeChannel(channel.channelPort);
@@ -194,15 +189,17 @@ export default class ServiceProvider extends Peer {
                 });
 
                 // confirm open channel
-                this.send(peer.info.publicKey, Message.create(MessageActions.open, {
-                    channelPort: msg.channelPort,
-                    gatePort: msg.gatePort
-                }));
-
+                this.send(
+                    peer.info.publicKey,
+                    Message.create(MessageActions.open, {
+                        channelPort: msg.channelPort,
+                        gatePort: msg.gatePort,
+                    }),
+                );
             } else {
                 const channelPort = msg.channelPort;
-                if (channelPort==null) throw "Channel port is required";
-               
+                if (channelPort == null) throw "Channel port is required";
+
                 // pipe from route to service
                 if (msg.actionId == MessageActions.stream) {
                     const data = msg.data;
@@ -213,9 +210,9 @@ export default class ServiceProvider extends Peer {
                         // every time data is piped, reset channel expire time
                         channel.expire = Date.now() + channel.duration;
                         channel.socket.write(data);
-
                     }
-                } else if (msg.actionId == MessageActions.close) {  // close channel         
+                } else if (msg.actionId == MessageActions.close) {
+                    // close channel
                     if (channelPort <= 0) {
                         for (const channel of Object.values(peer.channels)) {
                             closeChannel(channel.channelPort);
@@ -223,15 +220,17 @@ export default class ServiceProvider extends Peer {
                     } else {
                         closeChannel(channelPort);
                     }
-
                 }
             }
         } catch (e) {
             console.error(e);
             if (msg.actionId) {
-                this.send(peer.info.publicKey, Message.create(msg.actionId, {
-                    error: e?.toString()
-                }));
+                this.send(
+                    peer.info.publicKey,
+                    Message.create(msg.actionId, {
+                        error: e?.toString(),
+                    }),
+                );
             }
         }
     }

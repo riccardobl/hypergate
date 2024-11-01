@@ -1,4 +1,4 @@
-import {  RoutingTable } from "./Router.js";
+import { RoutingTable } from "./Router.js";
 export type MessageContent = {
     error?: any;
     channelPort?: number;
@@ -8,7 +8,7 @@ export type MessageContent = {
     isGate?: boolean;
     routes?: RoutingTable;
     actionId?: number;
-}
+};
 
 export enum MessageActions {
     hello = 0, // handshake
@@ -18,10 +18,8 @@ export enum MessageActions {
     advRoutes = 4, // advertise peer routes
 }
 
-
 export default class Message {
-
-    public static create(actionId: number, msg: MessageContent) : Buffer {
+    public static create(actionId: number, msg: MessageContent): Buffer {
         if (msg.error) {
             const msgErrorBuffer = Buffer.from(JSON.stringify(msg.error), "utf8");
             if (msgErrorBuffer.length > 255) {
@@ -36,9 +34,9 @@ export default class Message {
             buffer.set(msgErrorBuffer, 1 + 1 + 4);
             return buffer;
         }
-        
+
         if (actionId == MessageActions.hello) {
-            if(!msg.auth) throw new Error("Auth is required for hello message");
+            if (!msg.auth) throw new Error("Auth is required for hello message");
             const buffer = Buffer.alloc(msg.auth.length + 1 + 1 + 4);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
@@ -46,15 +44,15 @@ export default class Message {
             buffer.set(msg.auth, 1 + 1 + 4);
             return buffer;
         } else if (actionId == MessageActions.close) {
-            if(msg.channelPort == null) throw new Error("Channel port is required for close message");
+            if (msg.channelPort == null) throw new Error("Channel port is required for close message");
             const buffer = Buffer.alloc(4 + 1 + 1);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
             buffer.writeUInt32BE(msg.channelPort, 2);
             return buffer;
         } else if (actionId == MessageActions.stream) {
-            if(msg.data == null) throw new Error("Data is required for stream message");
-            if(msg.channelPort == null) throw new Error("Channel port is required for stream message");
+            if (msg.data == null) throw new Error("Data is required for stream message");
+            if (msg.channelPort == null) throw new Error("Channel port is required for stream message");
             const buffer = Buffer.alloc(msg.data.length + 4 + 1 + 1);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
@@ -62,29 +60,26 @@ export default class Message {
             buffer.set(msg.data, 1 + 1 + 4);
             return buffer;
         } else if (actionId == MessageActions.advRoutes) {
-            const routes = Buffer.from(JSON.stringify({ routes: msg.routes }))
+            const routes = Buffer.from(JSON.stringify({ routes: msg.routes }));
             const buffer = Buffer.alloc(routes.length + 4 + 1 + 1);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
             buffer.writeUInt32BE(0, 2);
             buffer.set(routes, 1 + 1 + 4);
             return buffer;
-
         } else if (actionId == MessageActions.open) {
-            const buffer = Buffer.alloc(1+1+4+4);
+            const buffer = Buffer.alloc(1 + 1 + 4 + 4);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
             buffer.writeUInt32BE(msg.channelPort || 0, 2);
             buffer.writeUInt32BE(msg.gatePort || 0, 2 + 4);
             return buffer;
-
         } else {
-
             throw new Error("Unknown actionId " + actionId);
         }
     }
 
-    public static parse(data: Buffer) : MessageContent {
+    public static parse(data: Buffer): MessageContent {
         const actionId = data.readUInt8(0);
         const error = data.readUInt8(1);
         const channelPort = data.readUInt32BE(2);
@@ -94,43 +89,47 @@ export default class Message {
             return {
                 actionId: actionId,
                 error: JSON.parse(data.toString("utf8", 0, error)),
-                channelPort: channelPort
+                channelPort: channelPort,
             };
         }
 
-
-        if (actionId == MessageActions.open) { // open
+        if (actionId == MessageActions.open) {
+            // open
             const gatePort = data.readUInt32BE(0);
             return {
                 actionId: actionId,
                 gatePort: gatePort,
-                channelPort: channelPort
+                channelPort: channelPort,
             };
-        } else if (actionId == MessageActions.stream) { // stream
+        } else if (actionId == MessageActions.stream) {
+            // stream
             return {
                 actionId: actionId,
                 channelPort: channelPort,
-                data: data
+                data: data,
             };
-        } else if (actionId == MessageActions.close) { // close
+        } else if (actionId == MessageActions.close) {
+            // close
             return {
                 actionId: actionId,
-                channelPort: channelPort
+                channelPort: channelPort,
             };
-        } else if (actionId == MessageActions.advRoutes) { // get routing table
+        } else if (actionId == MessageActions.advRoutes) {
+            // get routing table
             return {
                 actionId: actionId,
                 routes: JSON.parse(data.toString("utf8")).routes,
-                channelPort: channelPort
+                channelPort: channelPort,
             };
-        } else if (actionId == MessageActions.hello) { // hello
+        } else if (actionId == MessageActions.hello) {
+            // hello
             const isGate = channelPort;
             const auth = data;
             return {
                 actionId: actionId,
                 auth: auth,
                 isGate: isGate == 1,
-                channelPort: channelPort
+                channelPort: channelPort,
             };
         }
         throw new Error("Unknown actionId " + actionId);
