@@ -37,6 +37,6 @@
   "scripts": {
     "build": "tsc",
     "start": "node ./build/dist/cli.js",
-    "debug": "tsx src/cli"
+    "debug": "HYPERGATE_VERBOSE=true tsx src/cli"
   }
 }
