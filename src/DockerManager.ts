@@ -147,16 +147,24 @@ export default class DockerManager {
             if (!network) continue;
 
             const customUnExposedPorts = (labels["hypergate.UNEXPOSE"] ?? "").split(",");
-
             // @ts-ignore
-            const ports = customUnExposedPorts.includes("*")
-                ? []
-                : [
-                      // @ts-ignore
-                      ...container.data.Ports.filter((p: any) => {
-                          return !customUnExposedPorts.includes(`${p.PrivatePort}/${p.Type}`) && !customUnExposedPorts.includes(`${p.PrivatePort}`);
-                      }),
-                  ];
+            console.log(container.data.Ports);
+            // @ts-ignore
+            const ports = [
+                // @ts-ignore
+                ...container.data.Ports.filter((p: any) => {
+                    if (p.PublicPort) return true;
+                    if (
+                        customUnExposedPorts.includes("*")||
+                        customUnExposedPorts.includes(`${p.PrivatePort}/${p.Type}`) ||
+                        customUnExposedPorts.includes(`${p.PrivatePort}`)
+                    ) {
+                        console.log("Unexposing", p.PrivatePort, p.Type);
+                        return false;
+                    }
+                    return true;
+                }),
+            ];
 
             const customExposedPorts = (labels["hypergate.EXPOSE"] ?? "").split(",");
             for (const customPort of customExposedPorts) {
