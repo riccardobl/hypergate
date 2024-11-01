@@ -65,6 +65,7 @@ Containers using the `EXPOSE` directive in Dockerfiles are automatically configu
 ### Custom Docker Labels
 - `hypergate.EXCLUDE="true|false"`: Exclude a container from announcements by the Service Provider.
 - `hypergate.EXPOSE="port[:public port][/protocol]"`: CSV list of ports to expose. Protocol defaults to TCP if omitted.
+- `hypergate.UNEXPOSE="port[/protocol]"`: CSV list of exposed port to ignore. Only ports exposed by the Dockerfile EXPOSE directive are affected by this label. If `*` is used, all ports exposed by the Dockerfile are ignored.
 
 ---
 

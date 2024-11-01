@@ -152,11 +152,16 @@ export default class DockerManager {
 
             const containerStatus = await container.status();
             // @ts-ignore
-            const network = containerStatus.data?.NetworkSettings?.Networks[networkName]
+            const network = containerStatus.data?.NetworkSettings?.Networks[networkName];
             if(!network) continue;
+            
+            const customUnExposedPorts = (labels['hypergate.UNEXPOSE']??'').split(',');
+            
             // @ts-ignore
-            const ports = [...container.data.Ports];
-        
+            const ports = customUnExposedPorts.includes("*") ? [] : [...container.data.Ports.filter((p:any)=>{
+                return !customUnExposedPorts.includes(`${p.PrivatePort}/${p.Type}`) && !customUnExposedPorts.includes(`${p.PrivatePort}`)
+            })];
+
             const customExposedPorts = (labels['hypergate.EXPOSE']??'').split(',')
             for(const customPort of customExposedPorts){
                 let [port,proto] = customPort.split('/')
