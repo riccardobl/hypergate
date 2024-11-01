@@ -273,7 +273,7 @@ export default class Gateway extends Peer {
                         });
 
                         // found a route
-                        console.info(
+                        console.log(
                             "New gate channel opened:", channelPort, " tot: ", gate.channels.length, gate.protocol,
                             "\nInitiated from ", socket.remoteAddress, ":", socket.remotePort,
                             "\n  To", socket.localAddress, ":", socket.localPort);
