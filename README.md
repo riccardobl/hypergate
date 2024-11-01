@@ -123,9 +123,11 @@ This example bridges networks across MACHINE1, MACHINE2, and MACHINE3, where:
     $ docker run -it --rm -u root --name="hypergate-sp-machine1" -v /var/run/docker.sock:/var/run/docker.sock hypergate --router <router-key> --docker --provider --network hypergatenet
     ```
 
-3. **Start MariaDB on MACHINE1**
+3. **Start MariaDB on MACHINE1 and connect to the network**
     ```bash
     docker run -d --rm --name test-mysql -eMYSQL_ROOT_HOST=% -eMYSQL_DATABASE=wp -e MYSQL_ROOT_PASSWORD=secretpassword --label hypergate.EXPOSE=3306 mysql
+
+    docker network connect hypergatenet test-mysql --alias mysql.hyper
     ```
 
 4. **Start Gateway on MACHINE2**
@@ -138,9 +140,10 @@ This example bridges networks across MACHINE1, MACHINE2, and MACHINE3, where:
     docker run -it --rm -u root --name="hypergate-sp-machine2" -v /var/run/docker.sock:/var/run/docker.sock hypergate --router <router-key> --docker --provider --network hypergatenet
     ```
 
-6. **Start phpMyAdmin on MACHINE2**
+6. **Start phpMyAdmin on MACHINE2 and connect to the network**
     ```bash
     docker run --rm --name test-phpmyadmin -d -e PMA_HOST=mysql.hyper --label hypergate.EXPOSE=80 phpmyadmin
+    docker network connect hypergatenet test-phpmyadmin --alias phpmyadmin.hyper
     ```
 
 7. **Start Gateway on MACHINE3**
