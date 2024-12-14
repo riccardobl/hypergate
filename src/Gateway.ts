@@ -59,7 +59,35 @@ export default class Gateway extends Peer {
             return false;
         });
         this.refresh();
+        this.stats();
     }
+
+    private stats(){
+        const activeGates = this.gates.length;
+        let activeChannels = 0;
+        let closingChannels = 0;
+        let pendingChannels = 0;
+        
+        for(const gate of this.gates){
+            activeChannels += gate.channels.filter(c=>c.alive && c.accepted).length;
+            closingChannels += gate.channels.filter(c=>!c.alive && c.accepted).length;
+            pendingChannels += gate.channels.filter(c=>!c.accepted).length;            
+        }
+
+        console.info(`
+            Gates
+                - active:  ${activeGates}
+            Channels
+                - active:  ${activeChannels}
+                - closing: ${closingChannels}
+                - pending: ${pendingChannels}            
+        `)
+
+        setTimeout(()=>{
+           this.stats();
+        }, 10*60_000);
+    }
+
 
     // merge routes
     private mergeRoutingTableFragment(routingTableFragment: RoutingTable, peerKey: Buffer) {
