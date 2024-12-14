@@ -46,11 +46,7 @@ export default class DockerManager {
     public async loop() {
         const services: Array<Service> = await this.getConnectedServices();
         if (this.serviceProvider) {
-            if (this.serviceProvider) {
-                for (const service of services) {
-                    this.serviceProvider.addService(service.gatePort, service.serviceHost, service.servicePort, service.protocol, service.tags);
-                }
-            }
+            this.serviceProvider.setServices(services);           
         }
         if (this.gateway) {
             await this.updateDockerGates(services);

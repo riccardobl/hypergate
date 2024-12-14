@@ -386,7 +386,7 @@ export default class Gateway extends Peer {
             }
         }
 
-        for (let i = 0; i < this.gates.length; i++) {
+        for (let i = 0; i < this.gates.length;) {
             const gate = this.gates[i];
             if (gate.refreshId != this.refreshId) {
                 this.gates.splice(i, 1);
@@ -394,6 +394,8 @@ export default class Gateway extends Peer {
                     await channel.close?.();
                 }
                 await gate.conn?.close();
+            } else {
+                i++;
             }
         }
         this.isRefreshing = false;
