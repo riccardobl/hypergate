@@ -240,7 +240,6 @@ export default class Gateway extends Peer {
                     console.error(e);
                 }
                 channel.alive = false;
-                delete gate.channels[channelPort];
                 this.releaseChannel(channelPort);
             };
 
@@ -425,6 +424,17 @@ export default class Gateway extends Peer {
                 i++;
             }
         }
+
+        for (const gate of this.gates) {
+            for (let j = 0; j < gate.channels.length;) {
+                if (!gate.channels[j].alive) {
+                    gate.channels.splice(j, 1);
+                } else {
+                    j++;
+                }
+            }
+        }
+
         this.isRefreshing = false;
     }
 }
