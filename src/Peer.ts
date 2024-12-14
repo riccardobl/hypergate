@@ -222,14 +222,14 @@ export default class Peer {
         );
     }
 
-    public async broadcast(msg: Buffer) {
+    public broadcast(msg: Buffer) {
         if (!this._authorizedPeers) return;
         for (const p of this._authorizedPeers) {
             this.send(p.info.publicKey, msg);
         }
     }
 
-    public async send(peerKey: Buffer, msg: Buffer) {
+    public send(peerKey: Buffer, msg: Buffer) {
         console.log("Sending message to", b4a.toString(peerKey, "hex"));
         const peer = this.getAuthorizedPeerByKey(peerKey);
 

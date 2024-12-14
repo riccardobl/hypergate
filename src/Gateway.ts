@@ -167,16 +167,15 @@ export default class Gateway extends Peer {
                 if (channel.route) {
                     // if route established
                     if (channel.buffer.length > 0) {
-                        while (channel.buffer.length > 0) {
-                            const buffered = channel.buffer.shift();
-                            this.send(
-                                channel.route,
-                                Message.create(MessageActions.stream, {
-                                    channelPort: channelPort,
-                                    data: buffered,
-                                }),
-                            );
-                        }
+                        const merged = Buffer.concat(channel.buffer);
+                        channel.buffer = [];
+                        this.send(
+                            channel.route,
+                            Message.create(MessageActions.stream, {
+                                channelPort: channelPort,
+                                data: merged,
+                            }),
+                        );
                     }
                     if (data) {
                         this.send(
