@@ -6,7 +6,7 @@
   "dependencies": {
     "@hyperswarm/dht": "^6.4.0",
     "@types/minimist": "^1.2.5",
-    "express": "^4.18.2",
+    "express": "^4.21.2",
     "hyperswarm": "^4.3.6",
     "minimist": "^1.2.5",
     "node-docker-api": "^1.1.22"
