@@ -62,16 +62,16 @@ export default class Gateway extends Peer {
         this.start().catch(console.error);
     }
 
-    private stats(){
+    private stats() {
         const activeGates = this.gates.length;
         let activeChannels = 0;
         let closingChannels = 0;
         let pendingChannels = 0;
-        
-        for(const gate of this.gates){
-            activeChannels += gate.channels.filter(c=>c.alive && c.accepted).length;
-            closingChannels += gate.channels.filter(c=>!c.alive && c.accepted).length;
-            pendingChannels += gate.channels.filter(c=>!c.accepted).length;            
+
+        for (const gate of this.gates) {
+            activeChannels += gate.channels.filter((c) => c.alive && c.accepted).length;
+            closingChannels += gate.channels.filter((c) => !c.alive && c.accepted).length;
+            pendingChannels += gate.channels.filter((c) => !c.accepted).length;
         }
 
         console.info(`
@@ -81,13 +81,12 @@ export default class Gateway extends Peer {
                 - active:  ${activeChannels}
                 - closing: ${closingChannels}
                 - pending: ${pendingChannels}            
-        `)
+        `);
 
-        setTimeout(()=>{
-           this.stats();
-        }, 10*60_000);
+        setTimeout(() => {
+            this.stats();
+        }, 10 * 60_000);
     }
-
 
     // merge routes
     private mergeRoutingTableFragment(routingTableFragment: RoutingTable, peerKey: Buffer) {
@@ -271,8 +270,8 @@ export default class Gateway extends Peer {
                     const routeFindingStartedAt = Date.now();
 
                     while (true) {
-                        const route:Buffer = this.getRoute(gatePort);
-                
+                        const route: Buffer = this.getRoute(gatePort);
+
                         // send open request and wait for response
                         try {
                             await new Promise((res, rej) => {
@@ -343,7 +342,7 @@ export default class Gateway extends Peer {
                             break;
                         } catch (e) {
                             console.error(e);
-                            if(Date.now() - routeFindingStartedAt > this.routeFindingTimeout){
+                            if (Date.now() - routeFindingStartedAt > this.routeFindingTimeout) {
                                 throw new Error("Route finding timeout");
                             }
                             await new Promise((res) => setTimeout(res, 100)); // wait 100 ms
@@ -415,7 +414,7 @@ export default class Gateway extends Peer {
                 }
             }
 
-            for (let i = 0; i < this.gates.length;) {
+            for (let i = 0; i < this.gates.length; ) {
                 const gate = this.gates[i];
                 if (gate.refreshId != this.refreshId) {
                     this.gates.splice(i, 1);
@@ -429,7 +428,7 @@ export default class Gateway extends Peer {
             }
 
             for (const gate of this.gates) {
-                for (let j = 0; j < gate.channels.length;) {
+                for (let j = 0; j < gate.channels.length; ) {
                     if (!gate.channels[j].alive) {
                         gate.channels.splice(j, 1);
                     } else {
@@ -437,7 +436,6 @@ export default class Gateway extends Peer {
                     }
                 }
             }
-
         } catch (e) {
             console.error(e);
         }

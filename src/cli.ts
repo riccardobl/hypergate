@@ -244,23 +244,25 @@ async function cli(processArgv: string[]) {
     return ctx;
 }
 
-cli(process.argv).then((ctx) => {
-    process.on("SIGINT", function () {
-        if (ctx.dockerManagerSP) {
-            ctx.dockerManagerSP.stop();
-        }
-        if (ctx.dockerManagerGW) {
-            ctx.dockerManagerGW.stop();
-        }
-        if (ctx.serviceProvider) {
-            ctx.serviceProvider.stop();
-        }
-        if (ctx.serviceGateway) {
-            ctx.serviceGateway.stop();
-        }
-        process.exit();
+cli(process.argv)
+    .then((ctx) => {
+        process.on("SIGINT", function () {
+            if (ctx.dockerManagerSP) {
+                ctx.dockerManagerSP.stop();
+            }
+            if (ctx.dockerManagerGW) {
+                ctx.dockerManagerGW.stop();
+            }
+            if (ctx.serviceProvider) {
+                ctx.serviceProvider.stop();
+            }
+            if (ctx.serviceGateway) {
+                ctx.serviceGateway.stop();
+            }
+            process.exit();
+        });
+    })
+    .catch((err) => {
+        console.error(err);
+        process.exit(1);
     });
-}).catch((err) => {
-    console.error(err);
-    process.exit(1);
-});

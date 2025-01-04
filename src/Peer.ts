@@ -294,7 +294,7 @@ export default abstract class Peer {
         }
     }
 
-    protected async start(){
+    protected async start() {
         this.refresh().catch(console.error);
     }
 }

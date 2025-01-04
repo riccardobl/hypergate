@@ -58,7 +58,7 @@ export default class ServiceProvider extends Peer {
     }
 
     protected override async onRefresh() {
-        try { 
+        try {
             // Advertise local routes to newly connected peer
             const rfr = this.createRoutingTableFragment();
             if (rfr) {

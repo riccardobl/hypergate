@@ -43,10 +43,10 @@ export default class DockerManager {
     }
 
     private async loop() {
-        try{
+        try {
             const services: Array<Service> = await this.getConnectedServices();
             if (this.serviceProvider) {
-                this.serviceProvider.setServices(services);           
+                this.serviceProvider.setServices(services);
             }
             if (this.gateway) {
                 await this.updateDockerGates(services);
@@ -151,11 +151,7 @@ export default class DockerManager {
                 // @ts-ignore
                 ...container.data.Ports.filter((p: any) => {
                     if (p.PublicPort) return true;
-                    if (
-                        customUnExposedPorts.includes("*")||
-                        customUnExposedPorts.includes(`${p.PrivatePort}/${p.Type}`) ||
-                        customUnExposedPorts.includes(`${p.PrivatePort}`)
-                    ) {
+                    if (customUnExposedPorts.includes("*") || customUnExposedPorts.includes(`${p.PrivatePort}/${p.Type}`) || customUnExposedPorts.includes(`${p.PrivatePort}`)) {
                         console.log("Unexposing", p.PrivatePort, p.Type);
                         return false;
                     }
