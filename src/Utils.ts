@@ -41,7 +41,7 @@ export default class Utils {
                         console.info(socket.rawStream.remoteHost);
                     }
                 });
-                socket.on("error", (err: Error) => {
+                socket.on("error", () => {
                     if (socket.rawStream) {
                         console.info(socket.rawStream.remoteHost);
                     }

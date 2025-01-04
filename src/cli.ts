@@ -100,7 +100,7 @@ async function cli(processArgv: string[]) {
         help(processArgv);
     } else {
         if (!argv.verbose) {
-            console.log = (...args: any[]) => {};
+            console.log = () => {};
         }
 
         const docker = argv.docker;
@@ -260,4 +260,7 @@ cli(process.argv).then((ctx) => {
         }
         process.exit();
     });
+}).catch((err) => {
+    console.error(err);
+    process.exit(1);
 });

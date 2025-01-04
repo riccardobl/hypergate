@@ -11,9 +11,9 @@ export default class ServiceProvider extends Peer {
     private isStopped = false;
     private isRefreshing = false;
 
-    constructor(secret: string, opts?: {}) {
+    constructor(secret: string, opts?: object) {
         super(secret, false, opts);
-        this.refresh();
+        this.refresh().catch(console.error);
     }
 
     public setServices(services: Service[]): Array<Service> {
@@ -60,18 +60,22 @@ export default class ServiceProvider extends Peer {
     }
 
     async refresh() {
-        if (this.isStopped) return;
-        super.refresh();
-        this.isRefreshing = true;
+        try { 
+            if (this.isStopped) return;
+            await super.refresh();
+            this.isRefreshing = true;
 
-        // Advertise local routes to newly connected peer
-        const rfr = this.createRoutingTableFragment();
-        if (rfr) {
-            await this.broadcast(Message.create(MessageActions.advRoutes, { routes: rfr }));
-            console.log("Broadcast routing fragment", rfr);
+            // Advertise local routes to newly connected peer
+            const rfr = this.createRoutingTableFragment();
+            if (rfr) {
+                await this.broadcast(Message.create(MessageActions.advRoutes, { routes: rfr }));
+                console.log("Broadcast routing fragment", rfr);
+            }
+
+            this.isRefreshing = false;
+        } catch (e) {
+            console.error(e);
         }
-
-        this.isRefreshing = false;
     }
 
     protected async onAuthorizedMessage(peer: AuthorizedPeer, msg: MessageContent) {

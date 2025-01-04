@@ -1,4 +1,3 @@
-// @ts-ignore
 import { Docker } from "node-docker-api";
 import { Service } from "./Router.js";
 import ServiceProvider from "./ServiceProvider.js";
@@ -28,7 +27,7 @@ export default class DockerManager {
         } else if (serviceProvider instanceof Gateway) {
             this.gateway = serviceProvider;
         }
-        this.loop();
+        this.loop().catch(console.error);
     }
 
     private async getNetwork() {
@@ -43,15 +42,19 @@ export default class DockerManager {
         return network;
     }
 
-    public async loop() {
-        const services: Array<Service> = await this.getConnectedServices();
-        if (this.serviceProvider) {
-            this.serviceProvider.setServices(services);           
+    private async loop() {
+        try{
+            const services: Array<Service> = await this.getConnectedServices();
+            if (this.serviceProvider) {
+                this.serviceProvider.setServices(services);           
+            }
+            if (this.gateway) {
+                await this.updateDockerGates(services);
+            }
+            if (this.stopped) return;
+        } catch (e) {
+            console.error(e);
         }
-        if (this.gateway) {
-            await this.updateDockerGates(services);
-        }
-        if (this.stopped) return;
         this.refreshTimer = setTimeout(() => this.loop(), this.refreshTime);
     }
 

@@ -8,7 +8,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./build/dist",
-    "baseUrl": "./",
+    "baseUrl": "./src",
      "types": ["node"] 
   },
   "include": ["src/**/*"]

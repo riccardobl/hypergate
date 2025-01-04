@@ -43,7 +43,7 @@ export default class Gateway extends Peer {
     private refreshId: number = 0;
     private routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>;
 
-    constructor(secret: string, listenOnAddr: string, routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>, opts?: {}) {
+    constructor(secret: string, listenOnAddr: string, routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>, opts?: object) {
         super(secret, true, opts);
         this.listenOnAddr = listenOnAddr;
         this.routeFilter = routeFilter;
@@ -58,7 +58,7 @@ export default class Gateway extends Peer {
             }
             return false;
         });
-        this.refresh();
+        this.refresh().catch(console.error);
         this.stats();
     }
 
@@ -345,11 +345,11 @@ export default class Gateway extends Peer {
                         break;
                     } catch (e) {
                         console.error(e);
-                        new Promise((res, rej) => setTimeout(res, 100)); // wait 100 ms
+                        await new Promise((res) => setTimeout(res, 100)); // wait 100 ms
                     }
                 }
             };
-            findRoute();
+            findRoute().catch(console.error);
         };
 
         const gate: Gate = {
@@ -383,58 +383,62 @@ export default class Gateway extends Peer {
     }
 
     async refresh() {
-        if (this.isStopped) return;
-        super.refresh();
-        this.isRefreshing = true;
-        this.refreshId++;
+        try {
+            if (this.isStopped) return;
+            await super.refresh();
+            this.isRefreshing = true;
+            this.refreshId++;
 
-        for (const routingEntry of this.routingTable) {
-            try {
-                const gatePort = routingEntry.gatePort;
-                const gateProtocol = routingEntry.protocol;
-                if (this.routeFilter) {
-                    if (!(await this.routeFilter(routingEntry))) {
-                        // console.log("Route filtered", routingEntry);
-                        continue;
+            for (const routingEntry of this.routingTable) {
+                try {
+                    const gatePort = routingEntry.gatePort;
+                    const gateProtocol = routingEntry.protocol;
+                    if (this.routeFilter) {
+                        if (!(await this.routeFilter(routingEntry))) {
+                            // console.log("Route filtered", routingEntry);
+                            continue;
+                        }
                     }
-                }
-                let gate = this.getGate(gatePort, gateProtocol);
-                if (gate) {
-                    gate.refreshId = this.refreshId;
-                } else {
-                    gate = this.openGate(gatePort, gateProtocol);
+                    let gate = this.getGate(gatePort, gateProtocol);
                     if (gate) {
-                        this.gates.push(gate);
+                        gate.refreshId = this.refreshId;
+                    } else {
+                        gate = this.openGate(gatePort, gateProtocol);
+                        if (gate) {
+                            this.gates.push(gate);
+                        }
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            for (let i = 0; i < this.gates.length;) {
+                const gate = this.gates[i];
+                if (gate.refreshId != this.refreshId) {
+                    this.gates.splice(i, 1);
+                    for (const channel of gate.channels) {
+                        await channel.close?.();
+                    }
+                    await gate.conn?.close();
+                } else {
+                    i++;
+                }
+            }
+
+            for (const gate of this.gates) {
+                for (let j = 0; j < gate.channels.length;) {
+                    if (!gate.channels[j].alive) {
+                        gate.channels.splice(j, 1);
+                    } else {
+                        j++;
                     }
                 }
-            } catch (e) {
-                console.error(e);
             }
-        }
 
-        for (let i = 0; i < this.gates.length;) {
-            const gate = this.gates[i];
-            if (gate.refreshId != this.refreshId) {
-                this.gates.splice(i, 1);
-                for (const channel of gate.channels) {
-                    await channel.close?.();
-                }
-                await gate.conn?.close();
-            } else {
-                i++;
-            }
+            this.isRefreshing = false;
+        } catch (e) {
+            console.error(e);
         }
-
-        for (const gate of this.gates) {
-            for (let j = 0; j < gate.channels.length;) {
-                if (!gate.channels[j].alive) {
-                    gate.channels.splice(j, 1);
-                } else {
-                    j++;
-                }
-            }
-        }
-
-        this.isRefreshing = false;
     }
 }

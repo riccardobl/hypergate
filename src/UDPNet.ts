@@ -7,7 +7,7 @@ export default class UDPNet {
     private server: Dgram.Socket;
     private isServer: boolean;
     private isCloseable: boolean;
-    private events: { [key: string]: Array<Function> } = {};
+    private events: { [key: string]: Array<(...args: any) => void|Promise<void>> } = {};
     private connections: { [key: string]: UDPNet } = {};
     // private channelId: number;
     public remotePort: number = 0;
@@ -15,9 +15,9 @@ export default class UDPNet {
     public localPort: number = 0;
     public localAddress: string = "";
     public isClosed: boolean = false;
-    private onConnection: Function | null = null;
+    private onConnection?: (conn: UDPNet) => void;
 
-    static createServer(onConnection: Function): UDPNet {
+    static createServer(onConnection: (conn: UDPNet) => void): UDPNet {
         const server = new UDPNet(Dgram.createSocket("udp4"));
         server.onConnection = onConnection;
         server.isServer = true;
@@ -108,7 +108,7 @@ export default class UDPNet {
         this.server.send(data, this.remotePort, this.remoteAddress);
     }
 
-    public on(event: string, cb: Function): void {
+    public on(event: string, cb: (...args: any) => void | Promise<void>): void {
         if (!this.events[event]) this.events[event] = [];
         this.events[event].push(cb);
     }
@@ -117,7 +117,8 @@ export default class UDPNet {
         const listeners = this.events[event];
         if (!listeners) return;
         for (const l of listeners) {
-            l(...payload);
+            const r:any = l(...payload);
+            if(r instanceof Promise) r.catch(console.error);
         }
     }
 

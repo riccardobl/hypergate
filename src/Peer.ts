@@ -39,7 +39,7 @@ export default class Peer {
     private _authorizedPeers: AuthorizedPeer[] = [];
     private refreshing: boolean = false;
 
-    constructor(secret: string, isGate: boolean, opts?: {}) {
+    constructor(secret: string, isGate: boolean, opts?: object) {
         this.isGate = isGate;
 
         this.routerKeys = HyperDHT.keyPair(Buffer.from(secret, "hex"));
@@ -50,7 +50,7 @@ export default class Peer {
         this.swarm.on("error", (err: any) => console.log("Swarm error", err));
         this.swarm.on("connection", (c: any, peer: any) => {
             console.log("Swarm connection", b4a.toString(peer.publicKey, "hex"));
-            this.onConnection(c, peer);
+            this.onConnection(c, peer).catch(console.error);
         });
 
         this.discovery = this.swarm.join(this.routerKeys.publicKey, {
@@ -153,7 +153,7 @@ export default class Peer {
             try {
                 if (aPeer) {
                     const msg = Message.create(MessageActions.close, { channelPort: 0 });
-                    this.onAuthorizedMessage(aPeer, Message.parse(msg));
+                    this.onAuthorizedMessage(aPeer, Message.parse(msg)).catch(console.error);
                 }
             } catch (err) {
                 console.error("Error on close", err);
@@ -204,7 +204,7 @@ export default class Peer {
                         console.error("Unauthorized message from", b4a.toString(peer.publicKey, "hex"));
                         return;
                     } else {
-                        this.onAuthorizedMessage(aPeer, msg);
+                        this.onAuthorizedMessage(aPeer, msg).catch(console.error);
                     }
                 }
             } catch (err) {
@@ -257,14 +257,18 @@ export default class Peer {
     }
 
     public async refresh() {
-        if (this.stopped) return;
-        this.refreshing = true;
-        console.log("Refreshing peers");
-        await this.discovery.refresh({
-            server: true,
-            client: true,
-        });
-        this.refreshing = false;
+        try {
+            if (this.stopped) return;
+            this.refreshing = true;
+            console.log("Refreshing peers");
+            await this.discovery.refresh({
+                server: true,
+                client: true,
+            });
+            this.refreshing = false;
+        } catch (err) {
+            console.error("Error on refresh", err);
+        }
         setTimeout(() => this.refresh(), 5000);
     }
 
