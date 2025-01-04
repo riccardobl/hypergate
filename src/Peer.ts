@@ -28,16 +28,16 @@ export type AuthorizedPeer = {
     channels: { [channelPort: number]: PeerChannel };
 };
 
-export default class Peer {
-    private isGate: boolean;
-    private routerKeys: any;
-    private dht: any;
-    private swarm: any;
-    private discovery: any;
-    private stopped: boolean = false;
-    private messageHandlers: ((peer: AuthorizedPeer, msg: MessageContent) => boolean)[] = [];
-    private _authorizedPeers: AuthorizedPeer[] = [];
+export default abstract class Peer {
+    private readonly isGate: boolean;
+    private readonly routerKeys: any;
+    private readonly dht: any;
+    private readonly swarm: any;
+    private readonly discovery: any;
+    private readonly messageHandlers: ((peer: AuthorizedPeer, msg: MessageContent) => boolean)[] = [];
+    private readonly _authorizedPeers: AuthorizedPeer[] = [];
     private refreshing: boolean = false;
+    private stopped: boolean = false;
 
     constructor(secret: string, isGate: boolean, opts?: object) {
         this.isGate = isGate;
@@ -256,7 +256,9 @@ export default class Peer {
         }
     }
 
-    public async refresh() {
+    protected abstract onRefresh(): Promise<void>;
+
+    private async refresh() {
         try {
             if (this.stopped) return;
             this.refreshing = true;
@@ -265,9 +267,11 @@ export default class Peer {
                 server: true,
                 client: true,
             });
-            this.refreshing = false;
+            await this.onRefresh();
         } catch (err) {
             console.error("Error on refresh", err);
+        } finally {
+            this.refreshing = false;
         }
         setTimeout(() => this.refresh(), 5000);
     }
@@ -288,5 +292,9 @@ export default class Peer {
         } catch (err) {
             console.error("Error on stop", err);
         }
+    }
+
+    protected async start(){
+        this.refresh().catch(console.error);
     }
 }

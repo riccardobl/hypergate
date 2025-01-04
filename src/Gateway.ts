@@ -33,16 +33,15 @@ type Gate = {
 };
 
 export default class Gateway extends Peer {
-    private routingTable: RoutingTable = [];
+    private readonly routingTable: RoutingTable = [];
+    private readonly usedChannels: Set<number> = new Set();
+    private readonly listenOnAddr: string;
+    private readonly gates: Array<Gate> = [];
+    private readonly routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>;
+    private readonly routeFindingTimeout: number = 5 * 60 * 1000; // 5 minutes
+
     private nextChannelId: number = 0;
-    private usedChannels: Set<number> = new Set();
-    private isStopped = false;
-    private isRefreshing = false;
-    private listenOnAddr: string;
-    private gates: Array<Gate> = [];
     private refreshId: number = 0;
-    private routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>;
-    private routeFindingTimeout: number = 5 * 60 * 1000; // 5 minutes
 
     constructor(secret: string, listenOnAddr: string, routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>, opts?: object) {
         super(secret, true, opts);
@@ -59,8 +58,8 @@ export default class Gateway extends Peer {
             }
             return false;
         });
-        this.refresh().catch(console.error);
         this.stats();
+        this.start().catch(console.error);
     }
 
     private stats(){
@@ -384,15 +383,12 @@ export default class Gateway extends Peer {
         return gate;
     }
 
-    getGate(port: number, protocol: string) {
+    private getGate(port: number, protocol: string) {
         return this.gates.find((g) => g.port == port && g.protocol == protocol);
     }
 
-    async refresh() {
+    protected override async onRefresh() {
         try {
-            if (this.isStopped) return;
-            await super.refresh();
-            this.isRefreshing = true;
             this.refreshId++;
 
             for (const routingEntry of this.routingTable) {
@@ -442,7 +438,6 @@ export default class Gateway extends Peer {
                 }
             }
 
-            this.isRefreshing = false;
         } catch (e) {
             console.error(e);
         }
