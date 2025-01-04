@@ -17,6 +17,9 @@ export default class UDPNet {
     public isClosed: boolean = false;
     private onConnection?: (conn: UDPNet) => void;
 
+    // udp socket is never destroyed
+    public readonly destroyed: boolean = false;
+
     static createServer(onConnection: (conn: UDPNet) => void): UDPNet {
         const server = new UDPNet(Dgram.createSocket("udp4"));
         server.onConnection = onConnection;

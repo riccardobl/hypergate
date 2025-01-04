@@ -6,6 +6,7 @@ import b4a from "b4a";
 import UDPNet from "./UDPNet.js";
 import { RoutingEntry, RoutingTable } from "./Router.js";
 import { Socket as NetSocket } from "net";
+import Utils from "./Utils.js";
 
 type Socket = UDPNet | NetSocket;
 
@@ -170,12 +171,14 @@ export default class Gateway extends Peer {
             // on incoming connection, create a channel
             const channelPort = this.getNextChannel();
             console.log("Create channel", channelPort, "on gate", gatePort);
+
+            const duration = Utils.getConnDuration(protocol == "udp");
             const channel: Channel = {
                 // protocol:protocol,
                 socket: socket,
                 buffer: [],
-                duration: 1000 * 60,
-                expire: Date.now() + 1000 * 60,
+                duration,
+                expire: Date.now() + duration,
                 // gatePort:gatePort,
                 gate: gate,
                 alive: true,
@@ -246,7 +249,9 @@ export default class Gateway extends Peer {
             const timeout = () => {
                 if (!channel.alive) return;
                 try {
-                    if (channel.expire < Date.now()) {
+                    // if the socket is destroyed or the channel has expired
+                    const isExpired = socket.destroyed || channel.expire < Date.now();
+                    if (isExpired) {
                         console.log("Channel expired!");
                         channel.close?.();
                     }
@@ -367,12 +372,12 @@ export default class Gateway extends Peer {
             onConnection(gate, socket);
         });
 
-        conn.listen(port, this.listenOnAddr, () => {
-            if (port == 0) {
+        conn.listen(gate.port, this.listenOnAddr, () => {
+            if (gate.port == 0) {
                 const addr = conn.address();
                 if (!addr || typeof addr == "string") return;
                 else {
-                    port = addr.port ?? 0;
+                    gate.port = addr.port ?? 0;
                 }
             }
         });

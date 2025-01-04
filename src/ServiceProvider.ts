@@ -5,6 +5,7 @@ import UDPNet from "./UDPNet.js";
 import { MessageActions } from "./Message.js";
 import { AuthorizedPeer } from "./Peer.js";
 import { RoutingTable, Service } from "./Router.js";
+import Utils from "./Utils.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
@@ -130,11 +131,12 @@ export default class ServiceProvider extends Peer {
                     allowHalfOpen: true,
                 });
 
+                const duration = Utils.getConnDuration(isUDP);
                 // create channel
                 const channel = {
                     socket: serviceConn,
-                    duration: 1000 * 60, // 1 minute
-                    expire: Date.now() + 1000 * 60,
+                    duration,
+                    expire: Date.now() + duration,
                     gatePort: gatePort,
                     alive: true,
                     route: peer.info.publicKey,
@@ -160,7 +162,7 @@ export default class ServiceProvider extends Peer {
                 const timeout = () => {
                     if (!channel.alive) return;
                     try {
-                        if (channel.expire < Date.now()) {
+                        if (serviceConn.destroyed || channel.expire < Date.now()) {
                             console.log("Channel expired!");
                             closeChannel(channel.channelPort);
                         }

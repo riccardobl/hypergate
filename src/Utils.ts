@@ -6,6 +6,20 @@ import HyperDHT from "@hyperswarm/dht";
 import b4a from "b4a";
 
 export default class Utils {
+    static getConnDuration(isUDP: boolean): number {
+        // How long a connection will stay alive without data exchange
+        let duration = 1000 * 60;
+        if (!isUDP) {
+            // 21 years for tcp (it's a long time...)
+            // actually we want this closed by the underlying tcp stack, that's why we defacto never expire
+            duration = 1000 * 60 * 60 * 24 * 360 * 21;
+        } else {
+            // 1 hour for udp
+            duration = 1000 * 60 * 60;
+        }
+        return duration;
+    }
+
     static newSecret() {
         const b = Buffer.alloc(Sodium.randombytes_SEEDBYTES);
         Sodium.randombytes_buf(b);
