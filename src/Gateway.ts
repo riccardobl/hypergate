@@ -42,6 +42,7 @@ export default class Gateway extends Peer {
     private gates: Array<Gate> = [];
     private refreshId: number = 0;
     private routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>;
+    private routeFindingTimeout: number = 5 * 60 * 1000; // 5 minutes
 
     constructor(secret: string, listenOnAddr: string, routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>, opts?: object) {
         super(secret, true, opts);
@@ -266,87 +267,92 @@ export default class Gateway extends Peer {
 
             // look for a route
             const findRoute = async () => {
-                console.log("Looking for route");
-                while (true) {
-                    const route = this.getRoute(gatePort);
-                    if (!route) {
-                        // no route: kill channel
-                        channel.close?.();
-                        break;
-                    }
+                try {
+                    console.log("Looking for route");
+                    const routeFindingStartedAt = Date.now();
 
-                    // send open request and wait for response
-                    try {
-                        await new Promise((res, rej) => {
-                            console.log("Test route", b4a.toString(route, "hex"));
-                            this.send(
-                                route,
-                                Message.create(MessageActions.open, {
-                                    channelPort: channelPort,
-                                    gatePort: gatePort,
-                                }),
-                            );
-                            const timeout = setTimeout(() => rej("timeout"), 5000); // timeout open request
-                            this.addMessageHandler((peer, msg) => {
-                                if (msg.actionId == MessageActions.open && msg.channelPort == channelPort) {
-                                    if (msg.error) {
-                                        console.log("Received error", msg.error);
-                                        rej(msg.error);
-                                        return true; // error, detach
+                    while (true) {
+                        const route:Buffer = this.getRoute(gatePort);
+                
+                        // send open request and wait for response
+                        try {
+                            await new Promise((res, rej) => {
+                                console.log("Test route", b4a.toString(route, "hex"));
+                                this.send(
+                                    route,
+                                    Message.create(MessageActions.open, {
+                                        channelPort: channelPort,
+                                        gatePort: gatePort,
+                                    }),
+                                );
+                                const timeout = setTimeout(() => rej("timeout"), 5000); // timeout open request
+                                this.addMessageHandler((peer, msg) => {
+                                    if (msg.actionId == MessageActions.open && msg.channelPort == channelPort) {
+                                        if (msg.error) {
+                                            console.log("Received error", msg.error);
+                                            rej(msg.error);
+                                            return true; // error, detach
+                                        }
+                                        console.log("Received confirmation");
+                                        channel.route = route;
+                                        channel.accepted = true;
+                                        clearTimeout(timeout);
+                                        res(channel);
+                                        return true; // detach listener
                                     }
-                                    console.log("Received confirmation");
-                                    channel.route = route;
-                                    channel.accepted = true;
-                                    clearTimeout(timeout);
-                                    res(channel);
+                                    return !channel.alive; // detach when channel dies
+                                });
+                            });
+
+                            // found a route
+                            console.log(
+                                "New gate channel opened:",
+                                channelPort,
+                                " tot: ",
+                                gate.channels.length,
+                                gate.protocol,
+                                "\nInitiated from ",
+                                socket.remoteAddress,
+                                ":",
+                                socket.remotePort,
+                                "\n  To",
+                                socket.localAddress,
+                                ":",
+                                socket.localPort,
+                            );
+
+                            // pipe route data to gate
+                            this.addMessageHandler((peer, msg) => {
+                                // everytime data is piped, reset expiration
+                                channel.expire = Date.now() + channel.duration;
+
+                                // pipe
+                                if (msg.actionId == MessageActions.stream && msg.channelPort == channelPort && msg.data) {
+                                    socket.write(msg.data);
+                                    return false;
+                                } else if (msg.actionId == MessageActions.close && (!msg.channelPort || msg.channelPort == channelPort || msg.channelPort <= 0) /* close all */) {
+                                    channel.close?.();
                                     return true; // detach listener
                                 }
                                 return !channel.alive; // detach when channel dies
                             });
-                        });
 
-                        // found a route
-                        console.log(
-                            "New gate channel opened:",
-                            channelPort,
-                            " tot: ",
-                            gate.channels.length,
-                            gate.protocol,
-                            "\nInitiated from ",
-                            socket.remoteAddress,
-                            ":",
-                            socket.remotePort,
-                            "\n  To",
-                            socket.localAddress,
-                            ":",
-                            socket.localPort,
-                        );
+                            // pipe pending buffered data
+                            channel.pipeData?.();
 
-                        // pipe route data to gate
-                        this.addMessageHandler((peer, msg) => {
-                            // everytime data is piped, reset expiration
-                            channel.expire = Date.now() + channel.duration;
-
-                            // pipe
-                            if (msg.actionId == MessageActions.stream && msg.channelPort == channelPort && msg.data) {
-                                socket.write(msg.data);
-                                return false; // detach listener
-                            } else if (msg.actionId == MessageActions.close && (!msg.channelPort || msg.channelPort == channelPort || msg.channelPort <= 0) /* close all */) {
-                                channel.close?.();
-                                return true; // detach listener
+                            // exit route finding mode, now everything is ready
+                            break;
+                        } catch (e) {
+                            console.error(e);
+                            if(Date.now() - routeFindingStartedAt > this.routeFindingTimeout){
+                                throw new Error("Route finding timeout");
                             }
-                            return !channel.alive; // detach when channel dies
-                        });
-
-                        // pipe pending buffered data
-                        channel.pipeData?.();
-
-                        // exit route finding mode, now everything is ready
-                        break;
-                    } catch (e) {
-                        console.error(e);
-                        await new Promise((res) => setTimeout(res, 100)); // wait 100 ms
+                            await new Promise((res) => setTimeout(res, 100)); // wait 100 ms
+                        }
                     }
+                } catch (e) {
+                    channel.close?.();
+                    throw e;
                 }
             };
             findRoute().catch(console.error);
