@@ -4,6 +4,7 @@ import Net from "net";
 // @ts-ignore
 import b4a from "b4a";
 import UDPNet from "./UDPNet.js";
+import TCPNet from "./TCPNet.js";
 import { RoutingEntry, RoutingTable } from "./Router.js";
 import { Socket as NetSocket } from "net";
 import Utils from "./Utils.js";
@@ -288,7 +289,7 @@ export default class Gateway extends Peer {
                                         gatePort: gatePort,
                                     }),
                                 );
-                                const timeout = setTimeout(() => rej("timeout"), 5000); // timeout open request
+                                const timeout = setTimeout(() => rej("route timeout"), 5000); // timeout open request
                                 this.addMessageHandler((peer, msg) => {
                                     if (msg.actionId == MessageActions.open && msg.channelPort == channelPort) {
                                         if (msg.error) {
@@ -368,7 +369,7 @@ export default class Gateway extends Peer {
             refreshId: this.refreshId,
             channels: [],
         };
-        const conn = (protocol == "udp" ? UDPNet : Net).createServer((socket) => {
+        const conn = (protocol == "udp" ? UDPNet : TCPNet).createServer((socket) => {
             onConnection(gate, socket);
         });
 

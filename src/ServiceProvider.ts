@@ -1,11 +1,11 @@
 import Peer from "./Peer.js";
 import Message, { MessageContent } from "./Message.js";
-import Net from "net";
 import UDPNet from "./UDPNet.js";
 import { MessageActions } from "./Message.js";
 import { AuthorizedPeer } from "./Peer.js";
 import { RoutingTable, Service } from "./Router.js";
 import Utils from "./Utils.js";
+import TCPNet from "./TCPNet.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
@@ -125,7 +125,7 @@ export default class ServiceProvider extends Peer {
                 // connect to service
                 console.log("Connect to", service.serviceHost, service.servicePort, isUDP ? "UDP" : "TCP", "on channel", msg.channelPort);
 
-                const serviceConn = (isUDP ? UDPNet : Net).connect({
+                const serviceConn = (isUDP ? UDPNet : TCPNet).connect({
                     host: service.serviceHost,
                     port: service.servicePort,
                     allowHalfOpen: true,
