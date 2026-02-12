@@ -1,4 +1,4 @@
-import Message from "./Message.js";
+import Message, { MessageActions, MessageContent, MessageDecoder } from "./Message.js";
 // @ts-ignore
 import HyperDHT from "@hyperswarm/dht";
 // @ts-ignore
@@ -7,7 +7,6 @@ import Hyperswarm from "hyperswarm";
 import Sodium from "sodium-universal";
 // @ts-ignore
 import b4a from "b4a";
-import { MessageActions, MessageContent } from "./Message.js";
 import UDPNet from "./UDPNet.js";
 import Net from "net";
 
@@ -170,55 +169,74 @@ export default abstract class Peer {
             closeConn();
         });
 
+        const decoder = new MessageDecoder();
         c.on("data", (data: Buffer) => {
+            let messages: Buffer[] = [];
             try {
-                const msg = Message.parse(data);
-                if (msg.actionId == MessageActions.hello) {
-                    console.log("Receiving handshake");
-                    // Only gate->peer or peer->gate connections are allowed
-                    if (!this.isGate && !msg.isGate) {
-                        peer.ban(true);
-                        c.destroy();
-                        console.log("Ban because", b4a.toString(peer.publicKey, "hex"), "is not a gate and tried to connect to a peer", this.isGate, msg.isGate);
-                        return;
-                    }
-
-                    if (!msg.auth || !this.verifyAuthKey(peer.publicKey, msg.auth)) {
-                        console.error("Authorization failed for peer", b4a.toString(peer.publicKey, "hex"), "Ban!");
-                        console.log("Authorization failed using authkey ", b4a.toString(msg.auth, "hex"));
-                        peer.ban(true);
-                        c.destroy();
-                        return;
-                    }
-
-                    if (this.getAuthorizedPeerByKey(peer.publicKey)) {
-                        console.error("Already connected??", peer.publicKey);
-                        return;
-                    }
-
-                    this.addAuthorizedPeer(c, peer);
-                    console.info("Authorized", b4a.toString(peer.publicKey, "hex"));
-                } else {
-                    const aPeer = this.getAuthorizedPeerByKey(peer.publicKey);
-                    if (!aPeer) {
-                        console.error("Unauthorized message from", b4a.toString(peer.publicKey, "hex"));
-                        return;
-                    } else {
-                        this.onAuthorizedMessage(aPeer, msg).catch(console.error);
-                    }
-                }
+                messages = decoder.feed(data);
             } catch (err) {
-                console.error("Error on message", err);
+                console.error("Error decoding message", err);
+                closeConn();
+                try {
+                    c.destroy();
+                } catch (error) {
+                    console.error("Error destroying connection", error);
+                }
+                return;
+            }
+
+            for (const message of messages) {
+                try {
+                    const msg = Message.parse(message);
+                    if (msg.actionId == MessageActions.hello) {
+                        console.log("Receiving handshake");
+                        // Only gate->peer or peer->gate connections are allowed
+                        if (!this.isGate && !msg.isGate) {
+                            peer.ban(true);
+                            c.destroy();
+                            console.log("Ban because", b4a.toString(peer.publicKey, "hex"), "is not a gate and tried to connect to a peer", this.isGate, msg.isGate);
+                            return;
+                        }
+
+                        if (!msg.auth || !this.verifyAuthKey(peer.publicKey, msg.auth)) {
+                            console.error("Authorization failed for peer", b4a.toString(peer.publicKey, "hex"), "Ban!");
+                            console.log("Authorization failed using authkey ", b4a.toString(msg.auth, "hex"));
+                            peer.ban(true);
+                            c.destroy();
+                            return;
+                        }
+
+                        if (this.getAuthorizedPeerByKey(peer.publicKey)) {
+                            console.error("Already connected??", peer.publicKey);
+                            return;
+                        }
+
+                        this.addAuthorizedPeer(c, peer);
+                        console.info("Authorized", b4a.toString(peer.publicKey, "hex"));
+                    } else {
+                        const aPeer = this.getAuthorizedPeerByKey(peer.publicKey);
+                        if (!aPeer) {
+                            console.error("Unauthorized message from", b4a.toString(peer.publicKey, "hex"));
+                            return;
+                        } else {
+                            this.onAuthorizedMessage(aPeer, msg).catch(console.error);
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error on message", err);
+                }
             }
         });
 
         const authKey = this.getAuthKey(peer.publicKey);
         // console.log("Attempt authorization with authKey",b4a.toString(authKey,"hex"));
         c.write(
-            Message.create(MessageActions.hello, {
-                auth: authKey,
-                isGate: this.isGate,
-            }),
+            Message.frame(
+                Message.create(MessageActions.hello, {
+                    auth: authKey,
+                    isGate: this.isGate,
+                }),
+            ),
         );
     }
 
@@ -233,7 +251,7 @@ export default abstract class Peer {
         console.log("Sending message to", b4a.toString(peerKey, "hex"));
         const peer = this.getAuthorizedPeerByKey(peerKey);
 
-        if (peer) peer.c.write(msg);
+        if (peer) peer.c.write(Message.frame(msg));
         else console.error("Peer not found");
     }
 

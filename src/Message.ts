@@ -1,4 +1,7 @@
 import { RoutingTable } from "./Router.js";
+export const MAX_MESSAGE_LENGTH = 10 * 1024 * 1024;
+export const LENGTH_PREFIX_BYTES = 4;
+
 export type MessageContent = {
     error?: any;
     channelPort?: number;
@@ -19,6 +22,15 @@ export enum MessageActions {
 }
 
 export default class Message {
+    public static frame(payload: Buffer): Buffer {
+        if (payload.length > MAX_MESSAGE_LENGTH) {
+            throw new Error("Message too large");
+        }
+        const header = Buffer.alloc(LENGTH_PREFIX_BYTES);
+        header.writeUInt32BE(payload.length, 0);
+        return Buffer.concat([header, payload]);
+    }
+
     public static create(actionId: number, msg: MessageContent): Buffer {
         if (msg.error) {
             const msgErrorBuffer = Buffer.from(JSON.stringify(msg.error), "utf8");
@@ -80,6 +92,9 @@ export default class Message {
     }
 
     public static parse(data: Buffer): MessageContent {
+        if (!data || data.length < 6) {
+            throw new Error("Invalid message format");
+        }
         const actionId = data.readUInt8(0);
         const error = data.readUInt8(1);
         const channelPort = data.readUInt32BE(2);
@@ -133,5 +148,34 @@ export default class Message {
             };
         }
         throw new Error("Unknown actionId " + actionId);
+    }
+}
+
+export class MessageDecoder {
+    private buffer = Buffer.alloc(0);
+
+    public feed(chunk: Buffer): Buffer[] {
+        if (!chunk || chunk.length === 0) {
+            return [];
+        }
+        this.buffer = Buffer.concat([this.buffer, chunk]);
+        const messages: Buffer[] = [];
+        while (this.buffer.length >= LENGTH_PREFIX_BYTES) {
+            const length = this.buffer.readUInt32BE(0);
+            if (length > MAX_MESSAGE_LENGTH) {
+                throw new Error("Received message exceeds maximum allowed size");
+            }
+            const total = LENGTH_PREFIX_BYTES + length;
+            if (this.buffer.length < total) {
+                break;
+            }
+            messages.push(this.buffer.slice(LENGTH_PREFIX_BYTES, total));
+            this.buffer = this.buffer.slice(total);
+        }
+        return messages;
+    }
+
+    public reset(): void {
+        this.buffer = Buffer.alloc(0);
     }
 }
