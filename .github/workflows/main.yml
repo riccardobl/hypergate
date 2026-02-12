@@ -83,11 +83,10 @@ jobs:
       - name: Build and push to registry
         run: |
           VERSION="snapshot"
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
           fi
-          bash setversion.sh
-          echo ${{ secrets.GITHUB_TOKEN }} | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
-          docker build -t hypergate:$VERSION . -f docker/Dockerfile
-          docker tag hypergate:$VERSION docker.pkg.github.com/${{ github.repository }}/hypergate:${VERSION}
-          docker push docker.pkg.github.com/${{ github.repository }}/hypergate:${VERSION}
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')/hypergate"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build -t "${IMAGE}:${VERSION}" -f docker/Dockerfile .
+          docker push "${IMAGE}:${VERSION}"
