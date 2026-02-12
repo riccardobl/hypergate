@@ -85,20 +85,17 @@ export default class UDPNet {
     }
 
     public close(): void {
+        if (this.isClosed) return;
         this.isClosed = true;
         if (this.isCloseable) {
-            if (!this.isClosed) {
-                this.server.close();
-                this.emitEvent("close", []);
-                this.close();
-            }
-        } else {
-            const key = this.remoteAddress + ":" + this.remotePort;
-            const conn = this.connections[key];
-            if (conn) {
-                conn.emitEvent("close", []);
-                delete this.connections[key];
-            }
+            this.server.close();
+            return;
+        }
+        const key = this.remoteAddress + ":" + this.remotePort;
+        const conn = this.connections[key];
+        if (conn) {
+            conn.emitEvent("close", []);
+            delete this.connections[key];
         }
     }
 
