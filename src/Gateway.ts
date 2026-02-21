@@ -9,12 +9,15 @@ import { RoutingEntry, RoutingTable } from "./Router.js";
 import { Socket as NetSocket } from "net";
 import Utils from "./Utils.js";
 
+export const MAX_BUFFER_PER_CHANNEL = 150 * 1024 * 1024; // 150 MB
+
 type Socket = UDPNet | NetSocket;
 
 type Channel = {
     socket: any;
     route?: Buffer;
     buffer: Array<Buffer>;
+    bufferSize: number;
     duration: number;
     expire: number;
     gate: any;
@@ -178,6 +181,7 @@ export default class Gateway extends Peer {
                 // protocol:protocol,
                 socket: socket,
                 buffer: [],
+                bufferSize: 0,
                 duration,
                 expire: Date.now() + duration,
                 // gatePort:gatePort,
@@ -200,6 +204,7 @@ export default class Gateway extends Peer {
                     if (channel.buffer.length > 0) {
                         const merged = Buffer.concat(channel.buffer);
                         channel.buffer = [];
+                        channel.bufferSize = 0;
                         this.send(
                             channel.route,
                             Message.create(MessageActions.stream, {
@@ -219,7 +224,18 @@ export default class Gateway extends Peer {
                     }
                 } else {
                     // if still waiting for a route, buffer
-                    if (data) channel.buffer.push(data);
+                    if (data && channel.alive) {
+                        // limit how much data we buffer
+                        channel.bufferSize += data.length;
+                        if (channel.bufferSize > MAX_BUFFER_PER_CHANNEL) {
+                            console.warn("Buffer limit exceeded for channel " + channelPort + ", killing it immediately");
+                            channel.buffer = [];
+                            channel.bufferSize = 0;
+                            channel.close?.();
+                            return;
+                        }
+                        channel.buffer.push(data);
+                    }
                 }
             };
 

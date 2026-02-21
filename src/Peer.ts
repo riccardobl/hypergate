@@ -151,7 +151,7 @@ export default abstract class Peer {
             const aPeer = this.getAuthorizedPeerByKey(peer.publicKey);
             try {
                 if (aPeer) {
-                    const msg = Message.create(MessageActions.close, { channelPort: 0 });
+                    const msg = Message.create(MessageActions.close, { channelPort: 0 })?.[0];
                     this.onAuthorizedMessage(aPeer, Message.parse(msg)).catch(console.error);
                 }
             } catch (err) {
@@ -235,24 +235,30 @@ export default abstract class Peer {
                 Message.create(MessageActions.hello, {
                     auth: authKey,
                     isGate: this.isGate,
-                }),
+                })?.[0],
             ),
         );
     }
 
-    public broadcast(msg: Buffer) {
+    public broadcast(msg: Buffer | Buffer[]) {
         if (!this._authorizedPeers) return;
-        for (const p of this._authorizedPeers) {
-            this.send(p.info.publicKey, msg);
+        if (!Array.isArray(msg)) msg = [msg];
+        for (const m of msg) {
+            for (const p of this._authorizedPeers) {
+                this.send(p.info.publicKey, m);
+            }
         }
     }
 
-    public send(peerKey: Buffer, msg: Buffer) {
-        console.log("Sending message to", b4a.toString(peerKey, "hex"));
-        const peer = this.getAuthorizedPeerByKey(peerKey);
+    public send(peerKey: Buffer, msg: Buffer | Buffer[]) {
+        if (!Array.isArray(msg)) msg = [msg];
+        for (const m of msg) {
+            console.log("Sending message to", b4a.toString(peerKey, "hex"));
+            const peer = this.getAuthorizedPeerByKey(peerKey);
 
-        if (peer) peer.c.write(Message.frame(msg));
-        else console.error("Peer not found");
+            if (peer) peer.c.write(Message.frame(m));
+            else console.error("Peer not found");
+        }
     }
 
     public addMessageHandler(handler: (peer: AuthorizedPeer, msg: MessageContent) => boolean) {
@@ -265,8 +271,8 @@ export default abstract class Peer {
             const handler = this.messageHandlers[i];
             try {
                 if (handler(peer, msg)) {
-                    // remove
                     this.messageHandlers.splice(i, 1);
+                    i--;
                 }
             } catch (err) {
                 console.error("Error on message handler", err);
