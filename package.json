@@ -19,7 +19,7 @@
     "url": "https://github.com/riccardobl/hypergate.git"
   },
   "author": "Riccardo Balbo",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
   "bugs": {
     "url": "https://github.com/riccardobl/hypergate/issues"
   },
@@ -28,19 +28,22 @@
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
+  "overrides": {
+    "minimatch": "^10.2.2"
+  },
   "devDependencies": {
-    "@eslint/js": "^9.17.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.8.6",
-    "@typescript-eslint/eslint-plugin": "^8.19.0",
-    "@typescript-eslint/parser": "^8.19.0",
-    "eslint": "^9.17.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.0",
+    "@typescript-eslint/parser": "^8.56.0",
+    "eslint": "^10.0.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "prettier": "^3.4.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.19.0"
+    "typescript-eslint": "^8.56.0"
   },
   "scripts": {
     "build": "tsc",
