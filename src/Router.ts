@@ -1,6 +1,9 @@
+import type { IngressPolicy } from "./IngressPolicy.js";
+
 export type Route = {
     key: Buffer;
     routeExpiration: number;
+    ingressPolicy: IngressPolicy;
 };
 
 export type Service = {
@@ -9,6 +12,7 @@ export type Service = {
     servicePort: number;
     protocol: string;
     tags?: string;
+    ingressPolicy?: IngressPolicy;
 };
 
 export type RoutingEntry = Service & {

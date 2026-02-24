@@ -6,15 +6,18 @@ import { AuthorizedPeer } from "./Peer.js";
 import { RoutingTable, Service } from "./Router.js";
 import Utils from "./Utils.js";
 import TCPNet from "./TCPNet.js";
-import FingerprintResolver, { type FingerprintResolverOptions } from "./FingerprintResolver.js";
+import FingerprintResolver, { FingerprintResolverOptions } from "./FingerprintResolver.js";
+import { IngressPolicy } from "./IngressPolicy.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
     private readonly fingerprintResolver: FingerprintResolver;
+    private readonly ingressPolicy?: IngressPolicy;
 
-    constructor(secret: string, opts?: object, fingerprintResolverOpts?: FingerprintResolverOptions) {
+    constructor(secret: string, opts?: object, fingerprintResolverOpts?: FingerprintResolverOptions, ingressPolicy?: IngressPolicy) {
         super(secret, false, opts);
         this.fingerprintResolver = new FingerprintResolver(fingerprintResolverOpts);
+        this.ingressPolicy = ingressPolicy;
         this.fingerprintResolver.start();
         this.start().catch(console.error);
     }
@@ -27,13 +30,20 @@ export default class ServiceProvider extends Peer {
     public setServices(services: Service[]): Array<Service> {
         this.services = [];
         for (const service of services) {
-            this.addService(service.gatePort, service.serviceHost, service.servicePort, service.protocol);
+            this.addService(service.gatePort, service.serviceHost, service.servicePort, service.protocol, service.tags);
         }
         return this.services;
     }
 
     public addService(gatePort: number, serviceHost: string, servicePort: number, serviceProto: string, tags?: string): Service {
-        let service = this.services.find((s) => s.gatePort == gatePort && s.serviceHost == serviceHost && s.servicePort == servicePort && s.protocol == serviceProto && s.tags == tags);
+        let service = this.services.find(
+            (s) =>
+                s.gatePort == gatePort &&
+                s.serviceHost == serviceHost &&
+                s.servicePort == servicePort &&
+                s.protocol == serviceProto &&
+                s.tags == tags
+        );
         if (service) {
             console.log("Service already exists");
             return service;
@@ -69,6 +79,7 @@ export default class ServiceProvider extends Peer {
             const routingEntry = {
                 ...service,
                 routes: [],
+                ingressPolicy: this.ingressPolicy,
             };
             routingTable.push(routingEntry);
         }

@@ -91,14 +91,13 @@ export default class Message {
         } else if (actionId == MessageActions.open) {
             const fingerprintBuffer =
                 msg.fingerprint != null ? Buffer.from(JSON.stringify({ fingerprint: msg.fingerprint }), "utf8") : Buffer.alloc(0);
-            const buffer = Buffer.alloc(1 + 1 + 4 + 4 + 4 + fingerprintBuffer.length);
+            const buffer = Buffer.alloc(1 + 1 + 4 + 4 + fingerprintBuffer.length);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
             buffer.writeUInt32BE(msg.channelPort || 0, 2);
             buffer.writeUInt32BE(msg.gatePort || 0, 2 + 4);
-            buffer.writeUInt32BE(fingerprintBuffer.length, 1 + 1 + 4 + 4);
             if (fingerprintBuffer.length > 0) {
-                buffer.set(fingerprintBuffer, 1 + 1 + 4 + 4 + 4);
+                buffer.set(fingerprintBuffer, 1 + 1 + 4 + 4);
             }
             return [buffer];
         } else {
@@ -129,19 +128,14 @@ export default class Message {
             let fingerprint: { [key: string]: any } | undefined;
             // Backward compatible:
             // old format => [gatePort]
-            // new format => [gatePort][fingerprintLength][fingerprintJson]
-            if (data.length >= 8) {
-                const fingerprintLength = data.readUInt32BE(4);
-                if (fingerprintLength > 0 && data.length >= 8 + fingerprintLength) {
-                    try {
-                        const parsed = JSON.parse(data.subarray(8, 8 + fingerprintLength).toString("utf8"));
-                        if (parsed && typeof parsed === "object" && parsed.fingerprint && typeof parsed.fingerprint === "object") {
-                            fingerprint = parsed.fingerprint;
-                        }
-                    } catch {
-                        // ignore malformed optional fingerprint payload
-                    }
-                }
+            // new format => [gatePort][fingerprintJson]
+            if (data.length > 4) {
+                try {
+                    const parsed = JSON.parse(data.toString("utf8", 4));
+                    fingerprint = parsed.fingerprint;
+                } catch (e) {
+                    console.warn("Failed to parse fingerprint in open message", e);
+                }               
             }
             return {
                 actionId: actionId,

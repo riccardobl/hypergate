@@ -1,0 +1,52 @@
+{
+    "defaults": {
+        "allow": true,
+        "bandwidthLimit": {
+            "mbps": 10,
+            "burstMbps": 50
+        }
+    },
+    "ips": {
+        "203.0.113.10": {
+            "labels": [
+                "trusted",
+                "office"
+            ],
+            "bandwidthLimit": {
+                "mbps": 100,
+                "burstMbps": 200
+            }
+        },
+        "198.51.100.25": {
+            "allow": false,
+            "labels": [
+                "blocked"
+            ]
+        },
+        "192.0.2.40": {
+            "labels": [
+                "vpn"
+            ],
+            "onlyPorts": [
+                {
+                    "from": 80,
+                    "to": 443
+                }
+            ],
+            "excludePorts": [
+                {
+                    "from": 1194,
+                    "to": 1194
+                },
+                {
+                    "from": 51820,
+                    "to": 51820
+                }
+            ],
+            "bandwidthLimit": {
+                "mbps": 5,
+                "burstMbps": 20
+            }
+        }
+    }
+}

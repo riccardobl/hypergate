@@ -4,6 +4,7 @@ import ServiceProvider from "./ServiceProvider.js";
 import Gateway from "./Gateway.js";
 import Fs from "fs";
 import DockerManager from "./DockerManager.js";
+import { parseIngressPolicy, type IngressPolicy } from "./IngressPolicy.js";
 
 function help(argv: string[] = []) {
     const launchCmd = argv[0] + " " + argv[1];
@@ -23,6 +24,7 @@ Start a service provider:
         --fingerprintResolverHost <ip> : Fingerprint resolver bind host (default 0.0.0.0)
         --fingerprintResolverPort <port> : Fingerprint resolver bind port (default 8080)
         --fingerprintResolverBasicAuth <user:pass> : Enable basic auth for /resolve (default disabled)
+        --ingressPolicy <json|path|url> : Provider->gateway ingress policy (defaults/ips). Can be repeated and merged.
 
 Start a service gateway:
     ${launchCmd} --gateway <gateway file or json> --router  <router>
@@ -104,6 +106,25 @@ function loadEnvs(argv: any) {
     if (argv.fingerprintResolverBasicAuth == null) {
         argv.fingerprintResolverBasicAuth = process.env.HYPERGATE_FINGERPRINT_RESOLVER_BASIC_AUTH;
     }
+    if (argv.ingressPolicy == null) {
+        argv.ingressPolicy = process.env.HYPERGATE_INGRESS_POLICY;
+    }
+}
+
+async function loadJsonInput(value: any): Promise<any> {
+    if (typeof value !== "string") return value;
+    const v = value.trim();
+    if (!v) return undefined;
+    if (v.startsWith("{") || v.startsWith("[")) {
+        return JSON.parse(v);
+    }
+    if (v.startsWith("https://") || v.startsWith("http://")) {
+        return await fetch(v).then((res) => res.json());
+    }
+    if (Fs.existsSync(v)) {
+        return JSON.parse(Fs.readFileSync(v).toString());
+    }
+    throw new Error("Invalid JSON/path/url input " + v);
 }
 
 async function cli(processArgv: string[]) {
@@ -124,7 +145,6 @@ async function cli(processArgv: string[]) {
         const exposeOnlyPublished = argv.exposeOnlyPublished ?? !!false;
         const exposeOnlyDocker = argv.exposeOnlyDocker ?? !!docker;
         const exposeOnlyServices = argv.exposeOnlyServices?.split(",") ?? [];
-
         if (argv.new) {
             console.info(Utils.newSecret());
             return;
@@ -142,20 +162,45 @@ async function cli(processArgv: string[]) {
         }
 
         if (argv.provider) {
+            const policySources = Array.isArray(argv.ingressPolicy)
+                ? argv.ingressPolicy
+                : argv.ingressPolicy != null
+                    ? [argv.ingressPolicy]
+                    : [];
+
+            const policyJsons = [];
+            for (const src of policySources) {
+                try {
+                    const parsed = await loadJsonInput(src);
+                    if (parsed) {
+                        policyJsons.push(parsed);
+                    }
+                } catch (e) {
+                    console.error("Failed to load/parse ingress policy from " + src, e);
+                }
+            }
+
+            const providerIngressPolicy: IngressPolicy = parseIngressPolicy(...policyJsons);
+
             const fingerprintResolverPort =
                 argv.fingerprintResolverPort != null && argv.fingerprintResolverPort !== "" ? Number(argv.fingerprintResolverPort) : undefined;
             if (fingerprintResolverPort != null && !Number.isFinite(fingerprintResolverPort)) {
                 throw new Error("Invalid --fingerprintResolverPort " + argv.fingerprintResolverPort);
             }
 
-            ctx.serviceProvider = new ServiceProvider(secret, undefined, {
-                host: argv.fingerprintResolverHost,
-                port: fingerprintResolverPort,
-                basicAuth: argv.fingerprintResolverBasicAuth ?? null,
-            });
+            ctx.serviceProvider = new ServiceProvider(
+                secret,
+                undefined,
+                {
+                    host: argv.fingerprintResolverHost,
+                    port: fingerprintResolverPort,
+                    basicAuth: argv.fingerprintResolverBasicAuth ?? null,
+                },
+                providerIngressPolicy,
+            );
 
             for (let provider of Array.isArray(argv.provider) ? argv.provider : typeof argv.provider === "string" ? [argv.provider] : []) {
-                provider = argv.provider?.trim() ?? "";
+                provider = provider?.trim?.() ?? provider;
                 if (provider.startsWith("{") || provider.startsWith("[")) {
                     provider = JSON.parse(provider);
                 } else if (provider.startsWith("https://") || provider.startsWith("http://")) {
@@ -181,12 +226,25 @@ async function cli(processArgv: string[]) {
                     ) {
                         console.error("Invalid service", service);
                     } else {
-                        ctx.serviceProvider.addService(gatePort, serviceHost, servicePort, protocol, tags);
+                        ctx.serviceProvider.addService(
+                            gatePort,
+                            serviceHost,
+                            servicePort,
+                            protocol,
+                            tags,
+                        );
                     }
                 }
             }
             if (docker) {
-                ctx.dockerManagerSP = new DockerManager(ctx.serviceProvider, dockerNetwork, secret, typeof docker === "string" ? docker : undefined, dockerImage, refreshTime);
+                ctx.dockerManagerSP = new DockerManager(
+                    ctx.serviceProvider,
+                    dockerNetwork,
+                    secret,
+                    typeof docker === "string" ? docker : undefined,
+                    dockerImage,
+                    refreshTime,
+                );
             }
             return ctx;
         }
@@ -256,9 +314,16 @@ async function cli(processArgv: string[]) {
                     }
                 }
                 return true;
-            });
+            }, undefined);
             if (docker) {
-                ctx.dockerManagerGW = new DockerManager(ctx.serviceGateway, dockerNetwork, secret, typeof docker === "string" ? docker : undefined, dockerImage, refreshTime);
+                ctx.dockerManagerGW = new DockerManager(
+                    ctx.serviceGateway,
+                    dockerNetwork,
+                    secret,
+                    typeof docker === "string" ? docker : undefined,
+                    dockerImage,
+                    refreshTime,
+                );
             }
             return ctx;
         }

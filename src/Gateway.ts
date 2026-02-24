@@ -5,18 +5,22 @@ import Net from "net";
 import b4a from "b4a";
 import UDPNet from "./UDPNet.js";
 import TCPNet from "./TCPNet.js";
-import { RoutingEntry, RoutingTable } from "./Router.js";
+import { Route, RoutingEntry, RoutingTable } from "./Router.js";
 import { Socket as NetSocket } from "net";
 import Utils from "./Utils.js";
 import { randomBytes } from "crypto";
+import { RateLimiter } from "./RateLimit.js";
+import {
+    lookupIngressPolicy
+} from "./IngressPolicy.js";
 
 export const MAX_BUFFER_PER_CHANNEL = 150 * 1024 * 1024; // 150 MB
 
 type Socket = UDPNet | NetSocket;
 
-type Channel = {
+export type Channel = {
     socket: any;
-    route?: Buffer;
+    route?: Route;
     buffer: Array<Buffer>;
     bufferSize: number;
     duration: number;
@@ -28,6 +32,7 @@ type Channel = {
     channelPort: number;
     accepted?: boolean;
     fingerprint?: { [key: string]: any };
+    rateLimit?: RateLimiter;
 };
 
 type Gate = {
@@ -50,7 +55,12 @@ export default class Gateway extends Peer {
     private nextChannelId: number = 0;
     private refreshId: number = 0;
 
-    constructor(secret: string, listenOnAddr: string, routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>, opts?: object) {
+    constructor(
+        secret: string,
+        listenOnAddr: string,
+        routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>,
+        opts?: object
+    ) {
         super(secret, true, opts);
         this.listenOnAddr = listenOnAddr;
         this.routeFilter = routeFilter;
@@ -90,6 +100,17 @@ export default class Gateway extends Peer {
                 - pending: ${pendingChannels}            
         `);
 
+        const channelLines: string[] = [];
+        for (const gate of this.gates) {
+            for (const channel of gate.channels) {
+                if (!channel.alive) continue;
+                const stats = channel.rateLimit?.getStats() || "{}";
+                channelLines.push(JSON.stringify(stats, null, 2) + "\n  " + JSON.stringify(channel.fingerprint));
+            }
+        }
+        console.info("Channel details (" + channelLines.length + "):\n" + channelLines.join("\n"));
+
+
         setTimeout(() => {
             this.stats();
         }, 10 * 60_000);
@@ -103,6 +124,7 @@ export default class Gateway extends Peer {
             const alias = routingEntry.serviceHost;
             const protocol = routingEntry.protocol;
             const tags = routingEntry.tags;
+            const ingressPolicy = routingEntry.ingressPolicy;
             let storedRoutingEntry = this.routingTable.find((r) => r.gatePort == gatePort && r.serviceHost == alias && r.protocol == protocol && r.tags == tags);
             if (!storedRoutingEntry) {
                 storedRoutingEntry = {
@@ -121,17 +143,19 @@ export default class Gateway extends Peer {
                 route = {
                     key: peerKey,
                     routeExpiration: routeExpiration,
+                    ingressPolicy: ingressPolicy ?? {},
                 };
                 storedRoutingEntry.routes.push(route);
             } else {
                 route.routeExpiration = routeExpiration;
+                route.ingressPolicy = ingressPolicy ?? route.ingressPolicy;
             }
         }
         console.log("Update routing table", JSON.stringify(this.routingTable));
     }
 
     // find a route
-    public getRoute(gatePort: number, serviceHost?: string, protocol?: string, tags?: string): Buffer {
+    public getRoute(gatePort: number, serviceHost?: string, protocol?: string, tags?: string): [Route, RoutingEntry] {
         const ts: RoutingEntry[] = this.routingTable.filter(
             (r) => r.gatePort == gatePort && (!serviceHost || r.serviceHost == serviceHost) && (!protocol || r.protocol == protocol) && (!tags || r.tags == tags),
         );
@@ -145,7 +169,7 @@ export default class Gateway extends Peer {
                     t.routes.splice(t.i - 1, 1);
                     continue;
                 }
-                return route.key;
+                return [route, t];
             }
         }
         throw "No route found";
@@ -173,7 +197,7 @@ export default class Gateway extends Peer {
     // open a new gate
     public openGate(port: number, protocol: string) {
         const onConnection = (gate: Gate, socket: Socket) => {
-            const normalizeIp = (ip?: string) => (ip || "").replace(/^::ffff:/, "");
+            const remoteIp = socket.remoteAddress;
             const gatePort = gate.port;
             // on incoming connection, create a channel
             const channelPort = this.getNextChannel();
@@ -198,16 +222,16 @@ export default class Gateway extends Peer {
                     gatePort,
                     channelPort,
                     source: {
-                        ip: normalizeIp(socket.remoteAddress),
+                        ip: socket.remoteAddress,
                         ipRaw: socket.remoteAddress,
                         port: socket.remotePort ?? 0,
                     },
                     gateway: {
-                        ip: normalizeIp(socket.localAddress),
+                        ip: socket.localAddress,
                         ipRaw: socket.localAddress,
                         port: socket.localPort ?? 0,
                     },
-                },
+                }
             };
 
             // store channels in gateway object
@@ -215,56 +239,68 @@ export default class Gateway extends Peer {
 
             // pipe data to route
             channel.pipeData = (data?: Buffer) => {
-                // reset expiration everytime data is piped
-                channel.expire = Date.now() + channel.duration;
+                const handler = channel.rateLimit?.handle ?? ((data, callback) => {
+                    callback()
+                    return true;
+                });
 
-                // pipe
-                if (channel.route) {
-                    // if route established
-                    if (channel.buffer.length > 0) {
-                        const merged = Buffer.concat(channel.buffer);
-                        channel.buffer = [];
-                        channel.bufferSize = 0;
-                        this.send(
-                            channel.route,
-                            Message.create(MessageActions.stream, {
-                                channelPort: channelPort,
-                                data: merged,
-                            }),
-                        );
-                    }
-                    if (data) {
-                        this.send(
-                            channel.route,
-                            Message.create(MessageActions.stream, {
-                                channelPort: channelPort,
-                                data: data,
-                            }),
-                        );
-                    }
-                } else {
-                    // if still waiting for a route, buffer
-                    if (data && channel.alive) {
-                        // limit how much data we buffer
-                        channel.bufferSize += data.length;
-                        if (channel.bufferSize > MAX_BUFFER_PER_CHANNEL) {
-                            console.warn("Buffer limit exceeded for channel " + channelPort + ", killing it immediately");
+                const ok = handler(data, () => {
+                    // reset expiration everytime data is piped
+                    channel.expire = Date.now() + channel.duration;
+
+                    // pipe
+                    if (channel.route) {
+                        // if route established
+                        if (channel.buffer.length > 0) {
+                            const merged = Buffer.concat(channel.buffer);
                             channel.buffer = [];
                             channel.bufferSize = 0;
-                            channel.close?.();
-                            return;
+                            this.send(
+                                channel.route.key,
+                                Message.create(MessageActions.stream, {
+                                    channelPort: channelPort,
+                                    data: merged,
+                                }),
+                            );
                         }
-                        channel.buffer.push(data);
+                        if (data) {
+                            this.send(
+                                channel.route.key,
+                                Message.create(MessageActions.stream, {
+                                    channelPort: channelPort,
+                                    data: data,
+                                }),
+                            );
+                        }
+                    } else {
+                        // if still waiting for a route, buffer
+                        if (data && channel.alive) {
+                            // limit how much data we buffer
+                            channel.bufferSize += data.length;
+                            if (channel.bufferSize > MAX_BUFFER_PER_CHANNEL) {
+                                console.warn("Buffer limit exceeded for channel " + channelPort + ", killing it immediately");
+                                channel.buffer = [];
+                                channel.bufferSize = 0;
+                                channel.close?.();
+                                return;
+                            }
+                            channel.buffer.push(data);
+                        }
                     }
+                });
+                if (!ok && channel.alive) {
+                    console.warn("Rate limiter rejected channel " + channelPort + " (burst exceeded), closing");
+                    channel.close?.();
                 }
             };
 
             // close route (bidirectional)
             channel.close = () => {
+                channel.rateLimit?.close();
                 try {
                     if (channel.route) {
                         this.send(
-                            channel.route,
+                            channel.route.key,
                             Message.create(MessageActions.close, {
                                 channelPort: channelPort,
                             }),
@@ -312,14 +348,23 @@ export default class Gateway extends Peer {
                     const routeFindingStartedAt = Date.now();
 
                     while (true) {
-                        const route: Buffer = this.getRoute(gatePort);
+                        const [r, t]: [Route, RoutingEntry] = this.getRoute(gatePort);
+                        const routeIngressRule = lookupIngressPolicy(
+                            r.ingressPolicy,
+                            remoteIp!,
+                            gate.port,
+                            gate.protocol,
+                        );
+                        if (routeIngressRule && !routeIngressRule.allow) {
+                            throw new Error("Route denied by provider ingress policy");
+                        }
 
                         // send open request and wait for response
                         try {
                             await new Promise((res, rej) => {
-                                console.log("Test route", b4a.toString(route, "hex"));
+                                console.log("Test route", b4a.toString(r.key, "hex"));
                                 this.send(
-                                    route,
+                                    r.key,
                                     Message.create(MessageActions.open, {
                                         channelPort: channelPort,
                                         gatePort: gatePort,
@@ -335,7 +380,8 @@ export default class Gateway extends Peer {
                                             return true; // error, detach
                                         }
                                         console.log("Received confirmation");
-                                        channel.route = route;
+                                        channel.route = r;
+                                        channel.rateLimit = new RateLimiter(channelPort, routeIngressRule);
                                         channel.accepted = true;
                                         clearTimeout(timeout);
                                         res(channel);
