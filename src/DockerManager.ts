@@ -2,6 +2,7 @@ import { Docker } from "node-docker-api";
 import { Service } from "./Router.js";
 import ServiceProvider from "./ServiceProvider.js";
 import Gateway from "./Gateway.js";
+import { normalizeProtocol, protocolToString, Protocol } from "./Protocol.js";
 
 export default class DockerManager {
     private docker: Docker;
@@ -78,7 +79,7 @@ export default class DockerManager {
                 const filters = [];
                 const ExposedPorts: any = {};
                 for (const service of services) {
-                    ExposedPorts[`${service.servicePort}/${service.protocol}`] = {};
+                    ExposedPorts[`${service.servicePort}/${protocolToString(service.protocol)}`] = {};
                     filters.push({
                         serviceHost: service.serviceHost,
                     });
@@ -189,7 +190,7 @@ export default class DockerManager {
             // @ts-ignore
             const service = ports.map((ps: any) => {
                 let servicePort = ps.PrivatePort;
-                let serviceProto = ps.Type;
+                let serviceProto = normalizeProtocol(ps.Type) ?? Protocol.tcp;
                 let serviceHost = network?.Aliases?.[0] ?? name;
                 let gatePort = ps.PublicPort;
                 let published = !!gatePort;

@@ -8,6 +8,7 @@ import Utils from "./Utils.js";
 import TCPNet from "./TCPNet.js";
 import FingerprintResolver, { FingerprintResolverOptions } from "./FingerprintResolver.js";
 import { IngressPolicy } from "./IngressPolicy.js";
+import { Protocol, protocolToString } from "./Protocol.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
@@ -35,7 +36,7 @@ export default class ServiceProvider extends Peer {
         return this.services;
     }
 
-    public addService(gatePort: number, serviceHost: string, servicePort: number, serviceProto: string, tags?: string): Service {
+    public addService(gatePort: number, serviceHost: string, servicePort: number, serviceProto: Protocol, tags?: string): Service {
         let service = this.services.find(
             (s) =>
                 s.gatePort == gatePort &&
@@ -48,11 +49,11 @@ export default class ServiceProvider extends Peer {
             console.log("Service already exists");
             return service;
         }
-        console.info("Register service " + gatePort + " " + serviceHost + " " + servicePort + " " + serviceProto);
+        console.info("Register service " + gatePort + " " + serviceHost + " " + servicePort + " " + protocolToString(serviceProto));
         service = {
             serviceHost,
             servicePort,
-            protocol: serviceProto || "tcp",
+            protocol: serviceProto ?? Protocol.tcp,
             gatePort: gatePort,
             tags: tags,
         };
@@ -60,8 +61,10 @@ export default class ServiceProvider extends Peer {
         return service;
     }
 
-    public getServices(gatePort: number) {
-        return this.services.filter((s) => s.gatePort == gatePort);
+    public getServices(gatePort: number, protocol: Protocol) {
+        return this.services.filter(
+            (s) => s.gatePort == gatePort && s.protocol == protocol,
+        );
     }
 
     private registerFingerprintTuple(channel: any) {
@@ -131,9 +134,10 @@ export default class ServiceProvider extends Peer {
                 // open connection to service
                 const gatePort = msg.gatePort;
                 if (!gatePort) throw "Gate port is required";
-                const service = this.getServices(gatePort)[0];
+                const requestedProtocol = msg.protocol ?? Protocol.tcp;
+                const service = this.getServices(gatePort, requestedProtocol)[0];
                 if (!service) throw "Service not found " + gatePort;
-                const isUDP = service.protocol == "udp";
+                const isUDP = service.protocol == Protocol.udp;
                 const channelPort = msg.channelPort;
                 if (channelPort == null) throw "Channel port is required";
 
@@ -227,6 +231,7 @@ export default class ServiceProvider extends Peer {
                     Message.create(MessageActions.open, {
                         channelPort: msg.channelPort,
                         gatePort: msg.gatePort,
+                        protocol: service.protocol,
                     }),
                 );
             } else {

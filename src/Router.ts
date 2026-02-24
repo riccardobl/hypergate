@@ -1,4 +1,5 @@
 import type { IngressPolicy } from "./IngressPolicy.js";
+import type { Protocol } from "./Protocol.js";
 
 export type Route = {
     key: Buffer;
@@ -10,7 +11,7 @@ export type Service = {
     gatePort: number;
     serviceHost: string;
     servicePort: number;
-    protocol: string;
+    protocol: Protocol;
     tags?: string;
     ingressPolicy?: IngressPolicy;
 };

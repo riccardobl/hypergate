@@ -1,4 +1,5 @@
 import { BlockList, isIP } from "node:net";
+import { Protocol, protocolToString } from "./Protocol.js";
 
 export type BandwidthLimit = {
     mbps: number;
@@ -22,11 +23,20 @@ export type IngressPolicy = {
 };
 
 export function parseIngressPolicy(...inputs: {}[]): IngressPolicy {
-    let merge = {};
+    const merge: any = {};
+    const blockedKeys = new Set(["__proto__", "prototype", "constructor"]);
     function recursiveMerge(target: any, source: any) {
         for (const [key, value] of Object.entries(source)) {
+            if (blockedKeys.has(key)) {
+                continue;
+            }
             if (value && typeof value === "object" && !Array.isArray(value)) {
-                if (!target[key] || typeof target[key] !== "object" || Array.isArray(target[key])) {
+                if (
+                    !Object.prototype.hasOwnProperty.call(target, key) ||
+                    !target[key] ||
+                    typeof target[key] !== "object" ||
+                    Array.isArray(target[key])
+                ) {
                     target[key] = {};
                 }
                 recursiveMerge(target[key], value);
@@ -43,8 +53,9 @@ export function parseIngressPolicy(...inputs: {}[]): IngressPolicy {
     return merge;
 }
 
-export function lookupIngressPolicy(policy: IngressPolicy, ip: string, gatePort?: number, protocol?: string, label?: string): IngressPolicyRule | null {
+export function lookupIngressPolicy(policy: IngressPolicy, ip: string, gatePort?: number, protocol?: string | Protocol, label?: string): IngressPolicyRule | null {
     if (!ip) throw new Error("IP is required for ingress policy lookup");
+    const protocolName = typeof protocol === "number" ? protocolToString(protocol) : protocol;
     if (policy.ips) {
         // search first by label (most important)
         if (label && policy.ips) {
@@ -66,11 +77,11 @@ export function lookupIngressPolicy(policy: IngressPolicy, ip: string, gatePort?
                         continue;
                     }
                 }
-                if (protocol) {
-                    if (rule.onlyProtocols && !rule.onlyProtocols.includes(protocol)) {
+                if (protocolName) {
+                    if (rule.onlyProtocols && !rule.onlyProtocols.includes(protocolName)) {
                         continue;
                     }
-                    if (rule.excludeProtocols && rule.excludeProtocols.includes(protocol)) {
+                    if (rule.excludeProtocols && rule.excludeProtocols.includes(protocolName)) {
                         continue;
                     }
                 }

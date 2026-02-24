@@ -1,4 +1,5 @@
 import Http from "http";
+import { Protocol, protocolToString } from "./Protocol.js";
 
 export type FingerprintRecord = {
     fingerprint: { [key: string]: any };
@@ -34,7 +35,7 @@ export default class FingerprintResolver {
     private sweepTimer?: NodeJS.Timeout;
 
     constructor(opts: FingerprintResolverOptions = {}) {
-        this.host = opts.host || "0.0.0.0";
+        this.host = opts.host || "127.0.0.1";
         this.port = opts.port ?? 8080;
         this.basicAuth = this.parseBasicAuth(opts.basicAuth);
     }
@@ -136,7 +137,10 @@ export default class FingerprintResolver {
         const socket = channel?.socket;
         if (!fingerprint || !socket) return;
 
-        const protocol = String(channel?.service?.protocol || "tcp").toLowerCase();
+        const protocol =
+            (typeof channel?.service?.protocol === "number"
+                ? protocolToString(channel.service.protocol as Protocol)
+                : String(channel?.service?.protocol || "tcp").toLowerCase()) || "tcp";
         const localAddress = socket.localAddress;
         const localPort = socket.localPort;
         const remoteAddress = socket.remoteAddress;

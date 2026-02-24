@@ -1,4 +1,5 @@
 import { RoutingTable } from "./Router.js";
+import { Protocol, normalizeProtocol } from "./Protocol.js";
 export const MAX_MESSAGE_LENGTH = 10 * 1024 * 1024;
 export const LENGTH_PREFIX_BYTES = 4;
 
@@ -6,6 +7,7 @@ export type MessageContent = {
     error?: any;
     channelPort?: number;
     gatePort?: number;
+    protocol?: Protocol;
     data?: Buffer;
     auth?: Buffer;
     isGate?: boolean;
@@ -89,15 +91,21 @@ export default class Message {
             buffer.set(routes, 1 + 1 + 4);
             return [buffer];
         } else if (actionId == MessageActions.open) {
-            const fingerprintBuffer =
-                msg.fingerprint != null ? Buffer.from(JSON.stringify({ fingerprint: msg.fingerprint }), "utf8") : Buffer.alloc(0);
-            const buffer = Buffer.alloc(1 + 1 + 4 + 4 + fingerprintBuffer.length);
+            let protocolId = msg.protocol;
+            if (protocolId !== Protocol.tcp && protocolId !== Protocol.udp) {
+                protocolId = Protocol.tcp; // fallback to tcp
+            }
+            const fingerprints = msg.fingerprint != null ? Buffer.from(JSON.stringify(msg.fingerprint), "utf8") : Buffer.alloc(0);
+            const buffer = Buffer.alloc(1 + 1 + 4 + 4 + 1 + fingerprints.length);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
             buffer.writeUInt32BE(msg.channelPort || 0, 2);
             buffer.writeUInt32BE(msg.gatePort || 0, 2 + 4);
-            if (fingerprintBuffer.length > 0) {
-                buffer.set(fingerprintBuffer, 1 + 1 + 4 + 4);
+            let offset = 1 + 1 + 4 + 4;
+            buffer.writeUInt8(protocolId, offset);
+            offset += 1;
+            if (fingerprints.length > 0) {
+                buffer.set(fingerprints, offset);
             }
             return [buffer];
         } else {
@@ -125,23 +133,39 @@ export default class Message {
         if (actionId == MessageActions.open) {
             // open
             const gatePort = data.readUInt32BE(0);
+            let protocol: Protocol = Protocol.tcp;
             let fingerprint: { [key: string]: any } | undefined;
             // Backward compatible:
             // old format => [gatePort]
-            // new format => [gatePort][fingerprintJson]
+            // new format => [gatePort][protocolId][json?]
             if (data.length > 4) {
                 try {
-                    const parsed = JSON.parse(data.toString("utf8", 4));
-                    fingerprint = parsed.fingerprint;
+                    const pB = data.readUInt8(4);
+                    if (pB === Protocol.tcp || pB === Protocol.udp) {
+                        protocol = pB;
+                    } else {
+                        protocol = Protocol.tcp; // fallback to tcp
+                    }
+
+
+
+                    const remainder = data.subarray(5);
+                    if (remainder.length > 0) {
+                        fingerprint = JSON.parse(remainder.toString("utf8"));
+
+                    }
+
                 } catch (e) {
                     console.warn("Failed to parse fingerprint in open message", e);
                 }               
             }
+
             return {
                 actionId: actionId,
                 gatePort: gatePort,
+                protocol,
                 channelPort: channelPort,
-                fingerprint,
+                fingerprint: fingerprint ?? {},
             };
         } else if (actionId == MessageActions.stream) {
             // stream

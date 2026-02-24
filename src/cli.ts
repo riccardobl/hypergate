@@ -5,6 +5,7 @@ import Gateway from "./Gateway.js";
 import Fs from "fs";
 import DockerManager from "./DockerManager.js";
 import { parseIngressPolicy, type IngressPolicy } from "./IngressPolicy.js";
+import { normalizeProtocol } from "./Protocol.js";
 
 function help(argv: string[] = []) {
     const launchCmd = argv[0] + " " + argv[1];
@@ -21,7 +22,7 @@ Start a service provider:
     ${launchCmd} --provider <provider file or json> [--provider <another provider file or json>] --router <router>
 
     Provider options:
-        --fingerprintResolverHost <ip> : Fingerprint resolver bind host (default 0.0.0.0)
+        --fingerprintResolverHost <ip> : Fingerprint resolver bind host (default 127.0.0.1)
         --fingerprintResolverPort <port> : Fingerprint resolver bind port (default 8080)
         --fingerprintResolverBasicAuth <user:pass> : Enable basic auth for /resolve (default disabled)
         --ingressPolicy <json|path|url> : Provider->gateway ingress policy (defaults/ips). Can be repeated and merged.
@@ -214,6 +215,7 @@ async function cli(processArgv: string[]) {
                 const services = provider.services ?? provider;
                 for (const service of services) {
                     const { gatePort, serviceHost, servicePort, protocol, tags } = service;
+                    const protocolEnum = typeof protocol === "number" ? protocol : normalizeProtocol(protocol);
                     if (
                         !gatePort ||
                         !serviceHost ||
@@ -221,7 +223,7 @@ async function cli(processArgv: string[]) {
                         typeof gatePort !== "number" ||
                         typeof servicePort !== "number" ||
                         typeof serviceHost !== "string" ||
-                        typeof protocol !== "string" ||
+                        protocolEnum == null ||
                         (tags && typeof tags !== "string")
                     ) {
                         console.error("Invalid service", service);
@@ -230,7 +232,7 @@ async function cli(processArgv: string[]) {
                             gatePort,
                             serviceHost,
                             servicePort,
-                            protocol,
+                            protocolEnum,
                             tags,
                         );
                     }
@@ -281,8 +283,11 @@ async function cli(processArgv: string[]) {
                         return false;
                     }
                     if (filter.protocol !== undefined && filter.protocol != entry.protocol) {
+                        const filterProtocol = typeof filter.protocol === "number" ? filter.protocol : normalizeProtocol(filter.protocol);
+                        if (filterProtocol == null || filterProtocol != entry.protocol) {
+                            return false;
+                        }
                         // console.log("protocol", filter.protocol, entry.protocol)
-                        return false;
                     }
 
                     if (exposeOnlyServices && exposeOnlyServices.length > 0) {

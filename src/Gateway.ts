@@ -10,6 +10,7 @@ import { Socket as NetSocket } from "net";
 import Utils from "./Utils.js";
 import { randomBytes } from "crypto";
 import { RateLimiter } from "./RateLimit.js";
+import { Protocol, protocolToString } from "./Protocol.js";
 import {
     lookupIngressPolicy
 } from "./IngressPolicy.js";
@@ -36,7 +37,7 @@ export type Channel = {
 };
 
 type Gate = {
-    protocol: string;
+    protocol: Protocol;
     port: number;
     conn?: UDPNet | Net.Server;
     gateway: Gateway;
@@ -155,7 +156,7 @@ export default class Gateway extends Peer {
     }
 
     // find a route
-    public getRoute(gatePort: number, serviceHost?: string, protocol?: string, tags?: string): [Route, RoutingEntry] {
+    public getRoute(gatePort: number, serviceHost?: string, protocol?: Protocol, tags?: string): [Route, RoutingEntry] {
         const ts: RoutingEntry[] = this.routingTable.filter(
             (r) => r.gatePort == gatePort && (!serviceHost || r.serviceHost == serviceHost) && (!protocol || r.protocol == protocol) && (!tags || r.tags == tags),
         );
@@ -195,15 +196,16 @@ export default class Gateway extends Peer {
     }
 
     // open a new gate
-    public openGate(port: number, protocol: string) {
+    public openGate(port: number, protocol: Protocol) {
         const onConnection = (gate: Gate, socket: Socket) => {
             const remoteIp = socket.remoteAddress;
             const gatePort = gate.port;
+            const protocol = gate.protocol;
             // on incoming connection, create a channel
             const channelPort = this.getNextChannel();
             console.log("Create channel", channelPort, "on gate", gatePort);
 
-            const duration = Utils.getConnDuration(protocol == "udp");
+            const duration = Utils.getConnDuration(protocol == Protocol.udp);
             const channel: Channel = {
                 // protocol:protocol,
                 socket: socket,
@@ -218,7 +220,7 @@ export default class Gateway extends Peer {
                 fingerprint: {
                     id: randomBytes(16).toString("hex"),
                     openedAt: Date.now(),
-                    protocol: gate.protocol,
+                    protocol: protocolToString(gate.protocol),
                     gatePort,
                     channelPort,
                     source: {
@@ -358,6 +360,13 @@ export default class Gateway extends Peer {
                         if (routeIngressRule && !routeIngressRule.allow) {
                             throw new Error("Route denied by provider ingress policy");
                         }
+                        if (channel.fingerprint) {
+                            if (routeIngressRule?.labels && routeIngressRule.labels.length > 0) {
+                                channel.fingerprint.ingressLabels = [...routeIngressRule.labels];
+                            } else {
+                                delete channel.fingerprint.ingressLabels;
+                            }
+                        }
 
                         // send open request and wait for response
                         try {
@@ -368,6 +377,7 @@ export default class Gateway extends Peer {
                                     Message.create(MessageActions.open, {
                                         channelPort: channelPort,
                                         gatePort: gatePort,
+                                        protocol: gate.protocol,
                                         fingerprint: channel.fingerprint,
                                     }),
                                 );
@@ -452,7 +462,7 @@ export default class Gateway extends Peer {
             refreshId: this.refreshId,
             channels: [],
         };
-        const conn = (protocol == "udp" ? UDPNet : TCPNet).createServer((socket) => {
+        const conn = (protocol == Protocol.udp ? UDPNet : TCPNet).createServer((socket) => {
             onConnection(gate, socket);
         });
 
@@ -467,11 +477,11 @@ export default class Gateway extends Peer {
         });
 
         gate.conn = conn;
-        console.info("Opened new gate on", this.listenOnAddr + ":" + gate.port, "with protocol", gate.protocol);
+        console.info("Opened new gate on", this.listenOnAddr + ":" + gate.port, "with protocol", protocolToString(gate.protocol));
         return gate;
     }
 
-    private getGate(port: number, protocol: string) {
+    private getGate(port: number, protocol: Protocol) {
         return this.gates.find((g) => g.port == port && g.protocol == protocol);
     }
 
