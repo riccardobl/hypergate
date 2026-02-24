@@ -9,6 +9,13 @@ export default class UDPNet {
     private isCloseable: boolean;
     private events: { [key: string]: Array<(...args: any) => void | Promise<void>> } = {};
     private connections: { [key: string]: UDPNet } = {};
+    private parent?: UDPNet;
+    private parentKey?: string;
+    private readonly attachSocketListeners: boolean;
+    private readonly onSocketConnectHandler?: () => void;
+    private readonly onSocketMessageHandler?: (data: Buffer, info: Dgram.RemoteInfo) => void;
+    private readonly onSocketCloseHandler?: () => void;
+    private readonly onSocketErrorHandler?: (err: Error) => void;
     // private channelId: number;
     public remotePort: number = 0;
     public remoteAddress: string = "";
@@ -35,51 +42,58 @@ export default class UDPNet {
         return s;
     }
 
-    constructor(server: Dgram.Socket, isServer = true, isCloseable = true) {
+    constructor(server: Dgram.Socket, isServer = true, isCloseable = true, attachSocketListeners = true) {
         this.server = server;
         this.isServer = isServer;
         this.isCloseable = isCloseable;
+        this.attachSocketListeners = attachSocketListeners;
 
-        this.server.on("connect", () => {
-            this.syncLocalAddress();
-            this.emitEvent("connect", []);
-        });
-
-        this.server.on("message", (data, info) => {
-            const key = info.address + ":" + info.port;
-            if (this.isServer) {
-                let conn = this.connections[key];
-                if (!conn) {
-                    console.log("Connection not found for", key, "creating new connection");
-                    conn = new UDPNet(this.server);
-                    conn.remotePort = info.port;
-                    conn.remoteAddress = info.address;
-                    conn.localPort = this.localPort;
-                    conn.localAddress = this.localAddress;
-                    conn.isCloseable = false;
-                    this.connections[key] = conn;
-                    if (this.onConnection) this.onConnection(conn);
+        if (this.attachSocketListeners) {
+            this.onSocketConnectHandler = () => {
+                this.syncLocalAddress();
+                this.emitEvent("connect", []);
+            };
+            this.onSocketMessageHandler = (data, info) => {
+                const key = info.address + ":" + info.port;
+                if (this.isServer) {
+                    let conn = this.connections[key];
+                    if (!conn) {
+                        conn = new UDPNet(this.server, false, false, false);
+                        conn.parent = this;
+                        conn.parentKey = key;
+                        conn.remotePort = info.port;
+                        conn.remoteAddress = info.address;
+                        conn.localPort = this.localPort;
+                        conn.localAddress = this.localAddress;
+                        this.connections[key] = conn;
+                        if (this.onConnection) this.onConnection(conn);
+                    }
+                    conn.emitEvent("data", [data]);
+                } else {
+                    this.emitEvent("data", [data]);
                 }
-                conn.emitEvent("data", [data]);
-            } else {
-                this.emitEvent("data", [data]);
-            }
-        });
+            };
+            this.onSocketCloseHandler = () => {
+                for (const c of Object.values(this.connections)) {
+                    c.close();
+                }
+                this.emitEvent("close", []);
+                this.isClosed = true;
+                this.detachSocketEventHandlers();
+                this.clearEvents();
+            };
+            this.onSocketErrorHandler = async (err) => {
+                for (const c of Object.values(this.connections)) {
+                    c.emitEvent("error", [err]);
+                }
+                this.emitEvent("error", [err]);
+            };
 
-        this.server.on("close", async () => {
-            for (const c of Object.values(this.connections)) {
-                c.close();
-            }
-            this.emitEvent("close", []);
-            this.isClosed = true;
-        });
-
-        this.server.on("error", async (err) => {
-            for (const c of Object.values(this.connections)) {
-                c.emitEvent("error", [err]);
-            }
-            this.emitEvent("error", [err]);
-        });
+            this.server.on("connect", this.onSocketConnectHandler);
+            this.server.on("message", this.onSocketMessageHandler);
+            this.server.on("close", this.onSocketCloseHandler);
+            this.server.on("error", this.onSocketErrorHandler);
+        }
     }
 
     public connect(port: number, host: string): void {
@@ -96,12 +110,11 @@ export default class UDPNet {
             this.server.close();
             return;
         }
-        const key = this.remoteAddress + ":" + this.remotePort;
-        const conn = this.connections[key];
-        if (conn) {
-            conn.emitEvent("close", []);
-            delete this.connections[key];
+        if (this.parent && this.parentKey) {
+            delete this.parent.connections[this.parentKey];
         }
+        this.emitEvent("close", []);
+        this.clearEvents();
     }
 
     public end(): void {
@@ -130,13 +143,13 @@ export default class UDPNet {
 
     public listen(port: number, addr: string, dataListener?: (data: Buffer) => void): void {
         if (!this.isServer) throw new Error("Can't listen on this socket!");
-        this.server.bind(port, addr);
-        this.localPort = port;
-        this.localAddress = addr;
-        this.server.on("listening", () => {
+        this.server.once("listening", () => {
             this.syncLocalAddress();
             this.emitEvent("listening", []);
         });
+        this.server.bind(port, addr);
+        this.localPort = port;
+        this.localAddress = addr;
         if (dataListener) this.on("data", dataListener);
     }
 
@@ -157,5 +170,17 @@ export default class UDPNet {
         } catch {
             // socket may not be bound yet
         }
+    }
+
+    private clearEvents(): void {
+        this.events = {};
+    }
+
+    private detachSocketEventHandlers(): void {
+        if (!this.attachSocketListeners) return;
+        if (this.onSocketConnectHandler) this.server.off("connect", this.onSocketConnectHandler);
+        if (this.onSocketMessageHandler) this.server.off("message", this.onSocketMessageHandler);
+        if (this.onSocketCloseHandler) this.server.off("close", this.onSocketCloseHandler);
+        if (this.onSocketErrorHandler) this.server.off("error", this.onSocketErrorHandler);
     }
 }

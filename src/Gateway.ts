@@ -252,8 +252,8 @@ export default class Gateway extends Peer {
 
             // pipe data to route
             channel.pipeData = (data?: Buffer) => {
-                const handler = channel.rateLimit?.handle ?? ((data, callback) => {
-                    callback()
+                const handler = channel.rateLimit ? channel.rateLimit.handle.bind(channel.rateLimit) : ((data: Buffer, callback: () => void) => {
+                    callback();
                     return true;
                 });
 

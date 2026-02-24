@@ -1,6 +1,7 @@
 import { RoutingTable } from "./Router.js";
 import { Protocol, normalizeProtocol } from "./Protocol.js";
 export const MAX_MESSAGE_LENGTH = 10 * 1024 * 1024;
+export const MAX_TUNNEL_FRAME = 60 * 1024; // 60KB
 export const LENGTH_PREFIX_BYTES = 4;
 
 export type MessageContent = {
@@ -72,7 +73,7 @@ export default class Message {
             let total = msg.data.length;
             const output: Buffer[] = [];
             while (sent < total) {
-                let chunk = msg.data.subarray(sent, Math.min(sent + 1024 * 1024, total));
+                let chunk = msg.data.subarray(sent, Math.min(sent + MAX_TUNNEL_FRAME, total));
                 const buffer = Buffer.alloc(chunk.length + 4 + 1 + 1);
                 buffer.writeUInt8(actionId, 0);
                 buffer.writeUInt8(0, 1);
