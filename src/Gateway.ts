@@ -393,7 +393,7 @@ export default class Gateway extends Peer {
                                         fingerprint: channel.fingerprint,
                                     }),
                                 );
-                                const timeout = setTimeout(() => rej("route timeout " + JSON.stringify(gate)), 5000); // timeout open request
+                                const timeout = setTimeout(() => rej("route timeout " + gate.port + "->" + channelPort), 5000); // timeout open request
                                 this.addMessageHandler((peer, msg) => {
                                     if (msg.actionId == MessageActions.open && msg.channelPort == channelPort) {
                                         if (msg.error) {
