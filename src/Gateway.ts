@@ -8,6 +8,7 @@ import TCPNet from "./TCPNet.js";
 import { RoutingEntry, RoutingTable } from "./Router.js";
 import { Socket as NetSocket } from "net";
 import Utils from "./Utils.js";
+import { randomBytes } from "crypto";
 
 export const MAX_BUFFER_PER_CHANNEL = 150 * 1024 * 1024; // 150 MB
 
@@ -26,6 +27,7 @@ type Channel = {
     close?: () => void;
     channelPort: number;
     accepted?: boolean;
+    fingerprint?: { [key: string]: any };
 };
 
 type Gate = {
@@ -171,6 +173,7 @@ export default class Gateway extends Peer {
     // open a new gate
     public openGate(port: number, protocol: string) {
         const onConnection = (gate: Gate, socket: Socket) => {
+            const normalizeIp = (ip?: string) => (ip || "").replace(/^::ffff:/, "");
             const gatePort = gate.port;
             // on incoming connection, create a channel
             const channelPort = this.getNextChannel();
@@ -188,6 +191,23 @@ export default class Gateway extends Peer {
                 gate: gate,
                 alive: true,
                 channelPort,
+                fingerprint: {
+                    id: randomBytes(16).toString("hex"),
+                    openedAt: Date.now(),
+                    protocol: gate.protocol,
+                    gatePort,
+                    channelPort,
+                    source: {
+                        ip: normalizeIp(socket.remoteAddress),
+                        ipRaw: socket.remoteAddress,
+                        port: socket.remotePort ?? 0,
+                    },
+                    gateway: {
+                        ip: normalizeIp(socket.localAddress),
+                        ipRaw: socket.localAddress,
+                        port: socket.localPort ?? 0,
+                    },
+                },
             };
 
             // store channels in gateway object
@@ -303,9 +323,10 @@ export default class Gateway extends Peer {
                                     Message.create(MessageActions.open, {
                                         channelPort: channelPort,
                                         gatePort: gatePort,
+                                        fingerprint: channel.fingerprint,
                                     }),
                                 );
-                                const timeout = setTimeout(() => rej("route timeout"), 5000); // timeout open request
+                                const timeout = setTimeout(() => rej("route timeout " + JSON.stringify(gate)), 5000); // timeout open request
                                 this.addMessageHandler((peer, msg) => {
                                     if (msg.actionId == MessageActions.open && msg.channelPort == channelPort) {
                                         if (msg.error) {

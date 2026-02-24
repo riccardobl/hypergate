@@ -11,6 +11,7 @@ export type MessageContent = {
     isGate?: boolean;
     routes?: RoutingTable;
     actionId?: number;
+    fingerprint?: { [key: string]: any };
 };
 
 export enum MessageActions {
@@ -88,11 +89,17 @@ export default class Message {
             buffer.set(routes, 1 + 1 + 4);
             return [buffer];
         } else if (actionId == MessageActions.open) {
-            const buffer = Buffer.alloc(1 + 1 + 4 + 4);
+            const fingerprintBuffer =
+                msg.fingerprint != null ? Buffer.from(JSON.stringify({ fingerprint: msg.fingerprint }), "utf8") : Buffer.alloc(0);
+            const buffer = Buffer.alloc(1 + 1 + 4 + 4 + 4 + fingerprintBuffer.length);
             buffer.writeUInt8(actionId, 0);
             buffer.writeUInt8(0, 1);
             buffer.writeUInt32BE(msg.channelPort || 0, 2);
             buffer.writeUInt32BE(msg.gatePort || 0, 2 + 4);
+            buffer.writeUInt32BE(fingerprintBuffer.length, 1 + 1 + 4 + 4);
+            if (fingerprintBuffer.length > 0) {
+                buffer.set(fingerprintBuffer, 1 + 1 + 4 + 4 + 4);
+            }
             return [buffer];
         } else {
             throw new Error("Unknown actionId " + actionId);
@@ -119,10 +126,28 @@ export default class Message {
         if (actionId == MessageActions.open) {
             // open
             const gatePort = data.readUInt32BE(0);
+            let fingerprint: { [key: string]: any } | undefined;
+            // Backward compatible:
+            // old format => [gatePort]
+            // new format => [gatePort][fingerprintLength][fingerprintJson]
+            if (data.length >= 8) {
+                const fingerprintLength = data.readUInt32BE(4);
+                if (fingerprintLength > 0 && data.length >= 8 + fingerprintLength) {
+                    try {
+                        const parsed = JSON.parse(data.subarray(8, 8 + fingerprintLength).toString("utf8"));
+                        if (parsed && typeof parsed === "object" && parsed.fingerprint && typeof parsed.fingerprint === "object") {
+                            fingerprint = parsed.fingerprint;
+                        }
+                    } catch {
+                        // ignore malformed optional fingerprint payload
+                    }
+                }
+            }
             return {
                 actionId: actionId,
                 gatePort: gatePort,
                 channelPort: channelPort,
+                fingerprint,
             };
         } else if (actionId == MessageActions.stream) {
             // stream

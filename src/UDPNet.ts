@@ -40,6 +40,11 @@ export default class UDPNet {
         this.isServer = isServer;
         this.isCloseable = isCloseable;
 
+        this.server.on("connect", () => {
+            this.syncLocalAddress();
+            this.emitEvent("connect", []);
+        });
+
         this.server.on("message", (data, info) => {
             const key = info.address + ":" + info.port;
             if (this.isServer) {
@@ -105,6 +110,7 @@ export default class UDPNet {
 
     public write(data: Buffer): void {
         if (this.isServer) throw new Error("This socket is not writable");
+        this.syncLocalAddress();
         this.server.send(data, this.remotePort, this.remoteAddress);
     }
 
@@ -128,17 +134,28 @@ export default class UDPNet {
         this.localPort = port;
         this.localAddress = addr;
         this.server.on("listening", () => {
-            //const address = socket.address();
-            //this.localPort = address.port;
+            this.syncLocalAddress();
             this.emitEvent("listening", []);
         });
         if (dataListener) this.on("data", dataListener);
     }
 
     public address(): { port: number; address: string } {
+        this.syncLocalAddress();
         return {
             port: this.localPort,
             address: this.localAddress,
         };
+    }
+
+    private syncLocalAddress(): void {
+        try {
+            const info = this.server.address();
+            if (typeof info === "string") return;
+            this.localPort = info.port ?? this.localPort;
+            this.localAddress = info.address ?? this.localAddress;
+        } catch {
+            // socket may not be bound yet
+        }
     }
 }

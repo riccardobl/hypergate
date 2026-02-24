@@ -6,13 +6,22 @@ import { AuthorizedPeer } from "./Peer.js";
 import { RoutingTable, Service } from "./Router.js";
 import Utils from "./Utils.js";
 import TCPNet from "./TCPNet.js";
+import FingerprintResolver, { type FingerprintResolverOptions } from "./FingerprintResolver.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
+    private readonly fingerprintResolver: FingerprintResolver;
 
-    constructor(secret: string, opts?: object) {
+    constructor(secret: string, opts?: object, fingerprintResolverOpts?: FingerprintResolverOptions) {
         super(secret, false, opts);
+        this.fingerprintResolver = new FingerprintResolver(fingerprintResolverOpts);
+        this.fingerprintResolver.start();
         this.start().catch(console.error);
+    }
+
+    public override async stop() {
+        await this.fingerprintResolver.stop();
+        await super.stop();
     }
 
     public setServices(services: Service[]): Array<Service> {
@@ -43,6 +52,14 @@ export default class ServiceProvider extends Peer {
 
     public getServices(gatePort: number) {
         return this.services.filter((s) => s.gatePort == gatePort);
+    }
+
+    private registerFingerprintTuple(channel: any) {
+        this.fingerprintResolver.registerChannel(channel);
+    }
+
+    private unregisterFingerprintTuple(channel: any) {
+        this.fingerprintResolver.unregisterChannel(channel);
     }
 
     private createRoutingTableFragment(): RoutingTable {
@@ -78,6 +95,7 @@ export default class ServiceProvider extends Peer {
             const closeChannel = (channelPort: number) => {
                 const channel = peer.channels[channelPort];
                 if (!channel) return;
+                this.unregisterFingerprintTuple(channel);
                 try {
                     if (channel.route) {
                         this.send(
@@ -142,13 +160,19 @@ export default class ServiceProvider extends Peer {
                     route: peer.info.publicKey,
                     channelPort: channelPort,
                     service: service,
+                    fingerprint: msg.fingerprint,
                 };
                 peer.channels[channel.channelPort] = channel;
+
+                serviceConn.on("connect", () => {
+                    this.registerFingerprintTuple(channel);
+                });
 
                 // pipe from service to route
                 serviceConn.on("data", (data) => {
                     // every time data is piped, reset channel expire time
                     channel.expire = Date.now() + channel.duration;
+                    this.registerFingerprintTuple(channel);
 
                     this.send(
                         channel.route,
@@ -207,6 +231,7 @@ export default class ServiceProvider extends Peer {
                         // console.log("Pipe to route");
                         // every time data is piped, reset channel expire time
                         channel.expire = Date.now() + channel.duration;
+                        this.registerFingerprintTuple(channel);
                         channel.socket.write(data);
                     }
                 } else if (msg.actionId == MessageActions.close) {

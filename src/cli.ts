@@ -19,6 +19,11 @@ Scan a router:
 Start a service provider:
     ${launchCmd} --provider <provider file or json> [--provider <another provider file or json>] --router <router>
 
+    Provider options:
+        --fingerprintResolverHost <ip> : Fingerprint resolver bind host (default 0.0.0.0)
+        --fingerprintResolverPort <port> : Fingerprint resolver bind port (default 8080)
+        --fingerprintResolverBasicAuth <user:pass> : Enable basic auth for /resolve (default disabled)
+
 Start a service gateway:
     ${launchCmd} --gateway <gateway file or json> --router  <router>
 
@@ -90,6 +95,15 @@ function loadEnvs(argv: any) {
     if (argv.verbose == null) {
         argv.verbose = process.env.HYPERGATE_VERBOSE?.toLowerCase() === "true";
     }
+    if (argv.fingerprintResolverHost == null) {
+        argv.fingerprintResolverHost = process.env.HYPERGATE_FINGERPRINT_RESOLVER_HOST;
+    }
+    if (argv.fingerprintResolverPort == null) {
+        argv.fingerprintResolverPort = process.env.HYPERGATE_FINGERPRINT_RESOLVER_PORT;
+    }
+    if (argv.fingerprintResolverBasicAuth == null) {
+        argv.fingerprintResolverBasicAuth = process.env.HYPERGATE_FINGERPRINT_RESOLVER_BASIC_AUTH;
+    }
 }
 
 async function cli(processArgv: string[]) {
@@ -128,7 +142,17 @@ async function cli(processArgv: string[]) {
         }
 
         if (argv.provider) {
-            ctx.serviceProvider = new ServiceProvider(secret);
+            const fingerprintResolverPort =
+                argv.fingerprintResolverPort != null && argv.fingerprintResolverPort !== "" ? Number(argv.fingerprintResolverPort) : undefined;
+            if (fingerprintResolverPort != null && !Number.isFinite(fingerprintResolverPort)) {
+                throw new Error("Invalid --fingerprintResolverPort " + argv.fingerprintResolverPort);
+            }
+
+            ctx.serviceProvider = new ServiceProvider(secret, undefined, {
+                host: argv.fingerprintResolverHost,
+                port: fingerprintResolverPort,
+                basicAuth: argv.fingerprintResolverBasicAuth ?? null,
+            });
 
             for (let provider of Array.isArray(argv.provider) ? argv.provider : typeof argv.provider === "string" ? [argv.provider] : []) {
                 provider = argv.provider?.trim() ?? "";
