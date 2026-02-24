@@ -12,8 +12,10 @@ import { randomBytes } from "crypto";
 import { RateLimiter } from "./RateLimit.js";
 import { Protocol, protocolToString } from "./Protocol.js";
 import {
+    parseIngressPolicy,
     lookupIngressPolicy
 } from "./IngressPolicy.js";
+import LimitRemoverService from "./LimitRemoverService.js";
 
 export const MAX_BUFFER_PER_CHANNEL = 150 * 1024 * 1024; // 150 MB
 
@@ -45,6 +47,12 @@ type Gate = {
     channels: Array<Channel>;
 };
 
+export type GatewayAdminOptions = {
+    unlimitedSecret?: string | null;
+    unlimitedHost?: string;
+    unlimitedPort?: number;
+};
+
 export default class Gateway extends Peer {
     private readonly routingTable: RoutingTable = [];
     private readonly usedChannels: Set<number> = new Set();
@@ -52,6 +60,7 @@ export default class Gateway extends Peer {
     private readonly gates: Array<Gate> = [];
     private readonly routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>;
     private readonly routeFindingTimeout: number = 5 * 60 * 1000; // 5 minutes
+    private limitRemoverService?: LimitRemoverService;
 
     private nextChannelId: number = 0;
     private refreshId: number = 0;
@@ -60,7 +69,8 @@ export default class Gateway extends Peer {
         secret: string,
         listenOnAddr: string,
         routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>,
-        opts?: object
+        opts?: object,
+        adminOpts?: GatewayAdminOptions,
     ) {
         super(secret, true, opts);
         this.listenOnAddr = listenOnAddr;
@@ -76,6 +86,7 @@ export default class Gateway extends Peer {
             }
             return false;
         });
+        this.startAdminServer(adminOpts);
         this.stats();
         this.start().catch(console.error);
     }
@@ -352,7 +363,8 @@ export default class Gateway extends Peer {
                     while (true) {
                         const [r, t]: [Route, RoutingEntry] = this.getRoute(gatePort);
                         const routeIngressRule = lookupIngressPolicy(
-                            r.ingressPolicy,
+                            // merge route policy with local overrides if any
+                            parseIngressPolicy(r.ingressPolicy ?? {}, this.limitRemoverService?.getIngressOverrides() ?? {}),
                             remoteIp!,
                             gate.port,
                             gate.protocol,
@@ -538,5 +550,27 @@ export default class Gateway extends Peer {
         } catch (e) {
             console.error(e);
         }
+    }
+
+    public override async stop() {
+        if (this.limitRemoverService) {
+            await this.limitRemoverService.close();
+            this.limitRemoverService = undefined;
+        }
+        await super.stop();
+    }
+
+    private startAdminServer(opts?: GatewayAdminOptions) {
+        if (!opts?.unlimitedSecret) return;
+        const host = opts?.unlimitedHost || "127.0.0.1";
+        const port = opts?.unlimitedPort ?? 8091;
+        this.limitRemoverService = new LimitRemoverService({
+            secret: opts.unlimitedSecret,
+            host,
+            port,
+            onListen: (url) => {
+                console.info("Gateway admin endpoint listening on " + url);
+            },
+        });
     }
 }

@@ -8,6 +8,7 @@ export type BandwidthLimit = {
 export type IngressPolicyRule = {
     allow?: boolean;
     bandwidthLimit?: BandwidthLimit | null;
+    expireAt?: number;
     labels?: string[];
     onlyPorts?: [number, number];
     excludePorts?: [number, number];
@@ -50,16 +51,19 @@ export function parseIngressPolicy(...inputs: {}[]): IngressPolicy {
             recursiveMerge(merge, input);
         }
     }
+    pruneExpiredPolicyInPlace(merge);
     return merge;
 }
 
 export function lookupIngressPolicy(policy: IngressPolicy, ip: string, gatePort?: number, protocol?: string | Protocol, label?: string): IngressPolicyRule | null {
     if (!ip) throw new Error("IP is required for ingress policy lookup");
+    pruneExpiredPolicyInPlace(policy);
     const protocolName = typeof protocol === "number" ? protocolToString(protocol) : protocol;
     if (policy.ips) {
         // search first by label (most important)
         if (label && policy.ips) {
             for (const [ipPattern, rule] of Object.entries(policy.ips)) {
+                if (isRuleExpired(rule)) continue;
                 if (rule.labels?.includes(label)) {
                     return rule;
                 }
@@ -68,6 +72,7 @@ export function lookupIngressPolicy(policy: IngressPolicy, ip: string, gatePort?
 
         // search by ip and port (if specified) combo
         for (const [ipPattern, rule] of Object.entries(policy.ips || {})) {
+            if (isRuleExpired(rule)) continue;
             if (matchIpPattern(ip, ipPattern)) {
                 if (gatePort != null) {
                     if (rule.onlyPorts && (gatePort < rule.onlyPorts[0] || gatePort > rule.onlyPorts[1])) {
@@ -90,7 +95,8 @@ export function lookupIngressPolicy(policy: IngressPolicy, ip: string, gatePort?
         }
     }
     // return defaults if no specific rule matched
-    return policy.defaults || null;
+    if (policy.defaults && !isRuleExpired(policy.defaults)) return policy.defaults;
+    return null;
 }
 
 
@@ -130,4 +136,22 @@ function normalizeIpForMatch(ip: string): string {
     const noZone = ip.split("%")[0] || ip;
     // normalize IPv4-mapped IPv6 to IPv4 so existing ipv4 rules still match
     return noZone.startsWith("::ffff:") ? noZone.slice(7) : noZone;
+}
+
+function isRuleExpired(rule?: IngressPolicyRule | null): boolean {
+    if (!rule) return false;
+    return typeof rule.expireAt === "number" && Number.isFinite(rule.expireAt) && rule.expireAt <= Date.now();
+}
+
+function pruneExpiredPolicyInPlace(policy: IngressPolicy) {
+    if (!policy || typeof policy !== "object") return;
+    if (policy.defaults && isRuleExpired(policy.defaults)) {
+        delete policy.defaults;
+    }
+    if (!policy.ips) return;
+    for (const [ip, rule] of Object.entries(policy.ips)) {
+        if (isRuleExpired(rule)) {
+            delete policy.ips[ip];
+        }
+    }
 }

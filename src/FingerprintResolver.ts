@@ -1,5 +1,5 @@
-import Http from "http";
 import { Protocol, protocolToString } from "./Protocol.js";
+import HttpServer from "./HttpServer.js";
 
 export type FingerprintRecord = {
     fingerprint: { [key: string]: any };
@@ -26,46 +26,33 @@ export type FingerprintResolverOptions = {
     basicAuth?: string | null;
 };
 
-export default class FingerprintResolver {
+export default class FingerprintResolver extends HttpServer {
     private readonly fingerprintByTuple: Map<string, FingerprintRecord> = new Map();
-    private readonly host: string;
-    private readonly port: number;
     private readonly basicAuth?: { username: string; password: string };
-    private server?: Http.Server;
     private sweepTimer?: NodeJS.Timeout;
+    private stopped: boolean = false;
 
     constructor(opts: FingerprintResolverOptions = {}) {
-        this.host = opts.host || "127.0.0.1";
-        this.port = opts.port ?? 8080;
+        const host = opts.host || "127.0.0.1";
+        const port = opts.port ?? 8080;
+        super(host, port, (addr) => {
+            console.info("Fingerprint resolver listening on http://" + addr.address + ":" + addr.port);
+        });
         this.basicAuth = this.parseBasicAuth(opts.basicAuth);
-    }
-
-    public start() {
-        if (this.server) return;
-
         this.sweepTimer = setInterval(() => this.cleanupExpiredFingerprints(), 15_000);
 
-        this.server = Http.createServer((req, res) => {
+        this.addListener("/health", ({ res }) => {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: true }));
+        });
+        this.addListener("/resolve", ({ req, res, url }) => {
             try {
-                const url = new URL(req.url || "/", "http://localhost");
-                if (url.pathname === "/health") {
-                    res.writeHead(200, { "content-type": "application/json" });
-                    res.end(JSON.stringify({ ok: true }));
-                    return;
-                }
-
                 if (!this.authorize(req)) {
                     res.writeHead(401, {
                         "content-type": "application/json",
                         "www-authenticate": 'Basic realm="hypergate-fingerprint-resolver"',
                     });
                     res.end(JSON.stringify({ error: "unauthorized" }));
-                    return;
-                }
-
-                if (url.pathname !== "/resolve") {
-                    res.writeHead(404, { "content-type": "application/json" });
-                    res.end(JSON.stringify({ error: "not_found" }));
                     return;
                 }
 
@@ -107,29 +94,21 @@ export default class FingerprintResolver {
                 res.end(JSON.stringify({ error: "resolver_error", detail: e?.toString() }));
             }
         });
+    }
 
-        this.server.listen(this.port, this.host, () => {
-            const addr = this.server?.address();
-            if (addr && typeof addr !== "string") {
-                console.info("Fingerprint resolver listening on http://" + addr.address + ":" + addr.port);
-            }
-        });
-        this.server.on("error", (err) => {
-            console.error("Fingerprint resolver error", err);
-        });
+    public start() {
+        // HttpServer starts listening in the parent constructor.
+        // Keep this method for backward compatibility with existing call sites.
     }
 
     public async stop() {
+        if (this.stopped) return;
+        this.stopped = true;
         if (this.sweepTimer) {
             clearInterval(this.sweepTimer);
             this.sweepTimer = undefined;
         }
-        if (this.server) {
-            await new Promise<void>((resolve) => {
-                this.server?.close(() => resolve());
-            });
-            this.server = undefined;
-        }
+        await super.close();
     }
 
     public registerChannel(channel: ResolverChannelLike) {
@@ -169,7 +148,7 @@ export default class FingerprintResolver {
         delete channel.resolverTupleKey;
     }
 
-    private authorize(req: Http.IncomingMessage): boolean {
+    private authorize(req: { headers: Record<string, any> }): boolean {
         if (!this.basicAuth) return true;
         const auth = req.headers.authorization;
         if (!auth || !auth.startsWith("Basic ")) return false;

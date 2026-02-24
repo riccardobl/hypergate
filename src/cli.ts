@@ -32,6 +32,9 @@ Start a service gateway:
 
     Gateway options:
         --listen <ip> : Listen on ip (default 127.0.0.1)
+        --unlimitedSecret <secret> : Enable gateway /unlimited endpoint token auth (default disabled)
+        --unlimitedHost <ip> : Gateway /unlimited bind host (default 127.0.0.1)
+        --unlimitedPort <port> : Gateway /unlimited bind port (default 8091)
 
 Options:
     --help : Show this help               
@@ -109,6 +112,15 @@ function loadEnvs(argv: any) {
     }
     if (argv.ingressPolicy == null) {
         argv.ingressPolicy = process.env.HYPERGATE_INGRESS_POLICY;
+    }
+    if (argv.unlimitedSecret == null) {
+        argv.unlimitedSecret = process.env.HYPERGATE_UNLIMITED_SECRET;
+    }
+    if (argv.unlimitedHost == null) {
+        argv.unlimitedHost = process.env.HYPERGATE_UNLIMITED_HOST;
+    }
+    if (argv.unlimitedPort == null) {
+        argv.unlimitedPort = process.env.HYPERGATE_UNLIMITED_PORT;
     }
 }
 
@@ -267,6 +279,10 @@ async function cli(processArgv: string[]) {
                 }
             }
             const filters = gateway?.services ?? gateway;
+            const unlimitedPort = argv.unlimitedPort != null && argv.unlimitedPort !== "" ? Number(argv.unlimitedPort) : undefined;
+            if (unlimitedPort != null && !Number.isFinite(unlimitedPort)) {
+                throw new Error("Invalid --unlimitedPort " + argv.unlimitedPort);
+            }
             ctx.serviceGateway = new Gateway(secret, listenOn, async (entry) => {
                 if (!filters) return true;
                 for (const filter of filters) {
@@ -319,7 +335,11 @@ async function cli(processArgv: string[]) {
                     }
                 }
                 return true;
-            }, undefined);
+            }, undefined, {
+                unlimitedSecret: argv.unlimitedSecret ?? null,
+                unlimitedHost: argv.unlimitedHost,
+                unlimitedPort,
+            });
             if (docker) {
                 ctx.dockerManagerGW = new DockerManager(
                     ctx.serviceGateway,
