@@ -1,176 +1,350 @@
 # Hypergate
 
-**Hypergate** is a zero-configuration, peer-to-peer encrypted tunnel that enables seamless communication between Docker containers and physical machines across any location, even those behind NAT.
+Hypergate is a peer-to-peer encrypted tunnel for exposing local services across NAT/firewalls using Hyperswarm.
 
-## Components
-Hypergate comprises three primary components:
-- **Service Providers**: Make local services accessible to the network.
-- **Gateways**: Act as entry points, connecting to the appropriate Service Provider.
-- **Hypergate Router**: A virtual router connecting Service Providers and Gateways via a secret key that establishes a Hyperswarm connection.
+It is designed to be mostly zero-conf:
 
-Multiple Gateways and Service Providers can coexist on the same or different machines.
+- run a `Service Provider` where your private services live
+- run a `Gateway` where you want ports exposed
+- share the same router secret
 
-➡️ **Quick Start**: Jump to [Example: Providers-Gateways](#example-1-one-provider-one-gateway-with-docker) or [Example: Docker Network](#example-2-docker-virtual-network) for quick examples.
+That is enough for the basic flow.
 
----
 
-# Usage Overview
-Hypergate supports several usage modes:
+- [Roles](#roles)
+- [Why Hypergate](#why-hypergate)
+- [Network Layout (at a glance)](#network-layout-at-a-glance)
+- [Quick Start](#quick-start)
+- [Docker Mode](#docker-mode)
+  - [Example: Cross-Host Docker Network + Public Gateway](#example-cross-host-docker-network--public-gateway)
+- [Advanced](#advanced)
+  - [Ingress Policy (Provider -> Gateway)](#ingress-policy-provider---gateway)
+  - [Bandwidth Limiting (Gateway Ingress Shaping)](#bandwidth-limiting-gateway-ingress-shaping)
+  - [Fingerprint Resolver (Provider Side)](#fingerprint-resolver-provider-side)
+  - [Temporary “Unlimited” Override (Gateway)](#temporary-unlimited-override-gateway)
+- [Common CLI Options](#common-cli-options)
+- [Security Notes](#security-notes)
+- [License / Warranty](#license--warranty)
 
-- **Docker Bridge Network**: Bridges Docker networks across hosts, enabling container communication as if on the same machine.
-- **Docker Gateway**: Exposes Docker containers to the internet, bypassing NAT or firewall limitations.
-- **Generic Gateway or Reverse Proxy**: Exposes machine services behind NAT/firewall to the internet.
-- **P2P VPN**: Connects machines behind NAT/firewalls for direct interaction, such as gaming.
+## Roles
 
-Combine these modes for complex configurations tailored to specific use cases.
+- `Service Provider`: announces local services and accepts tunneled connections
+- `Gateway`: opens listening ports and forwards traffic to a provider
+- `Router secret`: shared secret that joins the same Hypergate mesh
 
-## Getting Started
-- To use **Hypergate** with Docker:
-  - [Docker](https://www.docker.com/) must be installed.
+Multiple providers and gateways can coexist on the same router.
 
-- To use **Hypergate** without Docker:
-  - Download the "hypergate" executable from the [release page](https://github.com/riccardobl/hypergate/releases) *(for x86_64 Linux)*.
-  - Or, clone the repository and run:
-    ```bash
-    npm i
-    npm run build
-    npm run start
-    ```
+## Why Hypergate
 
----
+- Expose services behind NAT
+- Bridge services across machines
+- Run a public gateway while keeping backends private
+- Work with Docker-discovered services
 
-# Network Configuration
-### One Provider, One Gateway vs. Multiple Providers, Multiple Gateways
+## Network Layout (at a glance)
 
-| Single Provider & Gateway  | Multiple Providers & Gateways |
-| -------------------------- | ----------------------------- |
+| Single Provider & Gateway | Multiple Providers & Gateways |
+| ------------------------- | ----------------------------- |
 | ![Single Provider and Gateway](static/gateway-provider.jpg) | ![Multiple Providers and Gateways](static/multi-gateway-provider.jpg) |
 
-In Hypergate, Service Providers are authoritative, updating Gateway routing tables to expose services. If multiple Providers compete for the same port, a round-robin method selects the next available Provider.
+Providers are authoritative for route advertisements. Gateways consume those routes and expose the matching ports. If multiple providers advertise the same service/gate, Hypergate can select among them.
 
-⚠️ **Security Tip**: Protect the Hypergate Router secret carefully to avoid unauthorized network reconfigurations. Use multiple routers to isolate services if different trust levels are needed.
+## Quick Start
 
----
+Generate a router secret:
 
-# Docker Virtual Network
+```bash
+hypergate --new
+```
+
+Start a provider:
+
+```bash
+hypergate --router <router-secret> --provider services/http.json
+```
+
+Start a gateway:
+
+```bash
+hypergate --router <router-secret> --gateway --listen 0.0.0.0
+```
+
+Example `services/http.json`:
+
+```json
+[
+  {
+    "gatePort": 8080,
+    "serviceHost": "127.0.0.1",
+    "servicePort": 8080,
+    "protocol": "tcp"
+  }
+]
+```
+
+Then connect to `<gateway-host>:8080`.
+
+
+
+## Docker Mode
+
+Hypergate can discover Docker containers and register services automatically.
+
 
 | Docker Virtual Network |
 | ---------------------- |
 | ![Docker Virtual Network](static/virtual-network.jpg) |
 
-**Hypergate** simplifies container networking, allowing containers in the same Hypergate network to communicate without complex configurations or port mappings. It leverages Hyperswarm for P2P connections, enabling NAT traversal through hole-punching techniques, with all connections automatically encrypted.
+This is one of the main zero-conf use cases: containers on different hosts can talk as if they were on the same Docker network, without manual port forwarding.
 
-Containers using the `EXPOSE` directive in Dockerfiles are automatically configured. Alternatively, specify ports with the `hypergate.EXPOSE` label in the `docker run` command.
+Docker containers using `EXPOSE` are discovered automatically. You can also control exposure with labels.
 
-### Custom Docker Labels
-- `hypergate.EXCLUDE="true|false"`: Exclude a container from announcements by the Service Provider.
-- `hypergate.EXPOSE="port[:public port][/protocol]"`: CSV list of ports to expose. Protocol defaults to TCP if omitted.
-- `hypergate.UNEXPOSE="port[/protocol]"`: CSV list of exposed port to ignore. Only ports exposed by the Dockerfile EXPOSE directive are affected by this label. If `*` is used, all ports exposed by the Dockerfile are ignored.
+Docker labels:
 
----
+- `hypergate.EXCLUDE=\"true|false\"`
+- `hypergate.EXPOSE=\"port[:public port][/protocol]\"`
+- `hypergate.UNEXPOSE=\"port[/protocol]\"`
 
-# Examples
+Examples:
 
-## Example 1: Exposing an HTTP Server Behind NAT
-This example exposes an HTTP server on MACHINE1 using a Service Provider and a Gateway on MACHINE2.
+Provider + Docker discovery:
 
-### Steps:
-1. **Start HTTP Service on MACHINE1**
-    ```bash
-    mkdir -p /tmp/www-test
-    cd /tmp/www-test
-    echo "Hello World" > index.html
-    busybox httpd -p 8080 -f .
-    ```
+```bash
+hypergate --router <router> --docker --provider --network hypergatenet
+```
 
-2. **Create the Router**
-    ```bash
-    $ hypergate --new
-    ```
+Gateway + Docker helper:
 
-3. **Start Service Provider on MACHINE1**
-    ```bash
-    $ hypergate --router <router-key> --provider services/http.json
-    ```
+```bash
+hypergate --router <router> --docker --gateway --listen 0.0.0.0 --network hypergatenet
+```
 
-4. **Start Gateway on MACHINE2**
-    ```bash
-    $ hypergate --router <router-key> --listen 0.0.0.0 --gateway
-    ```
+### Example: Cross-Host Docker Network + Public Gateway
 
-    **Note**: By default, the gateway will expose all services announced to the router. This behavior is generally desirable, but in some cases, you may want to limit exposure to specific services—such as if you have competing services on the same port or have concerns about provider trust. To achieve this, pass the same service definition used by the provider to the gateway, ensuring only that service is exposed:
-    ```bash
-    $ hypergate --router <router-key> --listen 0.0.0.0 --gateway services/http.json
-    ```
+Scenario:
 
-**Test**: Connect to MACHINE2:8080 to view the "Hello World" page from MACHINE1.
+- `MACHINE1` hosts MariaDB
+- `MACHINE2` hosts phpMyAdmin
+- `MACHINE3` exposes phpMyAdmin publicly
 
----
+1. Create router key
 
-## Example 2: Bridging a Docker Network with Gateway Creation
-This example bridges networks across MACHINE1, MACHINE2, and MACHINE3, where:
-- MACHINE1 hosts a MariaDB instance.
-- MACHINE2 hosts phpMyAdmin connecting to MariaDB.
-- MACHINE3 exposes phpMyAdmin publicly.
+```bash
+docker run -it --rm hypergate --new
+```
 
-### Steps:
-1. **Create Router Key**
-    ```bash
-    $ docker run -it --rm hypergate --new
-    ```
+2. Start Service Provider on `MACHINE1`
 
-2. **Start Service Provider on MACHINE1**
-    ```bash
-    $ docker run -it --rm -u root --name="hypergate-sp-machine1" -v /var/run/docker.sock:/var/run/docker.sock hypergate --router <router-key> --docker --provider --network hypergatenet
-    ```
+```bash
+docker run -it --rm -u root --name="hypergate-sp-machine1" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  hypergate --router <router-key> --docker --provider --network hypergatenet
+```
 
-3. **Start MariaDB on MACHINE1 and connect to the network**
-    ```bash
-    docker run -d --rm --name test-mysql -eMYSQL_ROOT_HOST=% -eMYSQL_DATABASE=wp -e MYSQL_ROOT_PASSWORD=secretpassword --label hypergate.EXPOSE=3306 mysql
+3. Start MariaDB on `MACHINE1` and connect it to the Hypergate Docker network
 
-    docker network connect hypergatenet test-mysql --alias mysql.hyper
-    ```
+```bash
+docker run -d --rm --name test-mysql \
+  -e MYSQL_ROOT_HOST=% \
+  -e MYSQL_DATABASE=wp \
+  -e MYSQL_ROOT_PASSWORD=secretpassword \
+  --label hypergate.EXPOSE=3306 \
+  mysql
 
-4. **Start Gateway on MACHINE2**
-    ```bash
-    docker run -it --rm -u root --name="hypergate-gw-machine2" -v /var/run/docker.sock:/var/run/docker.sock hypergate --router <router-key> --docker --gateway --listen 0.0.0.0 --network hypergatenet
-    ```
+docker network connect hypergatenet test-mysql --alias mysql.hyper
+```
 
-5. **Start Service Provider on MACHINE2**
-    ```bash
-    docker run -it --rm -u root --name="hypergate-sp-machine2" -v /var/run/docker.sock:/var/run/docker.sock hypergate --router <router-key> --docker --provider --network hypergatenet
-    ```
+4. Start Gateway on `MACHINE2`
 
-6. **Start phpMyAdmin on MACHINE2 and connect to the network**
-    ```bash
-    docker run --rm --name test-phpmyadmin -d -e PMA_HOST=mysql.hyper --label hypergate.EXPOSE=80 phpmyadmin
-    docker network connect hypergatenet test-phpmyadmin --alias phpmyadmin.hyper
-    ```
+```bash
+docker run -it --rm -u root --name="hypergate-gw-machine2" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  hypergate --router <router-key> --docker --gateway --listen 0.0.0.0 --network hypergatenet
+```
 
-7. **Start Gateway on MACHINE3**
-    ```bash
-    docker run -it --rm -u root --name="hypergate-gw-machine3" -v /var/run/docker.sock:/var/run/docker.sock -p 8080:80 hypergate --router <router-key> --docker --gateway --listen 0.0.0.0 --network hypergatenet --exposeOnlyServices phpmyadmin.hyper
-    ```
+5. Start Service Provider on `MACHINE2`
 
-**Test**: Access phpMyAdmin by connecting to MACHINE3:8080.
+```bash
+docker run -it --rm -u root --name="hypergate-sp-machine2" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  hypergate --router <router-key> --docker --provider --network hypergatenet
+```
+
+6. Start phpMyAdmin on `MACHINE2` and connect it to the Hypergate Docker network
+
+```bash
+docker run --rm --name test-phpmyadmin -d \
+  -e PMA_HOST=mysql.hyper \
+  --label hypergate.EXPOSE=80 \
+  phpmyadmin
+
+docker network connect hypergatenet test-phpmyadmin --alias phpmyadmin.hyper
+```
+
+7. Start public Gateway on `MACHINE3`
+
+```bash
+docker run -it --rm -u root --name="hypergate-gw-machine3" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -p 8080:80 \
+  hypergate --router <router-key> --docker --gateway --listen 0.0.0.0 \
+  --network hypergatenet --exposeOnlyServices phpmyadmin.hyper
+```
+
+Test:
+
+- Open `http://<machine3>:8080`
 
 
+## Advanced
 
+These are optional. You do not need them for normal usage.
 
-# License and Warranty
+### Ingress Policy (Provider -> Gateway)
 
-This is an experimental free software, there is no warranty. You are free to use, modify and redistribute it under certain conditions. 
+A provider can attach an ingress policy to routes so the gateway can:
 
-See the [LICENSE](LICENSE) file for details.
+- allow/deny specific client IPs
+- apply bandwidth shaping per IP
+- tag matching clients with labels (included in connection fingerprint metadata)
 
-This is an experimental software, it might or might not be production ready or even work as expected. 
+Pass it with:
 
-Use it at your own discretion.
+```bash
+hypergate --router <router> --provider services/http.json --ingressPolicy ingress.policy.example.json
+```
 
-# Similar projects
-Other projects related to sharing services with hyperswarm
+Minimal example:
 
-- [hypertele](https://github.com/bitfinexcom/hypertele) :  A swiss-knife proxy powered by Hyperswarm DHT 
-- [hyperseaport](https://github.com/ryanramage/hyperseaport) :  A p2p service registry 
-- [hyperssh](https://github.com/mafintosh/hyperssh) :  Run SSH over hyperswarm! 
-- [hyperbeam](https://github.com/mafintosh/hyperbeam) :  A 1-1 end-to-end encrypted internet pipe powered by Hyperswarm 
+```json
+{
+  "defaults": {
+    "allow": true,
+    "bandwidthLimit": { "mbps": 10, "burstMbps": 50 }
+  },
+  "ips": {
+    "203.0.113.10": {
+      "bandwidthLimit": null,
+      "labels": ["trusted"]
+    },
+    "198.51.100.25": {
+      "allow": false
+    }
+  }
+}
+```
+
+Notes:
+
+- First matching IP rule wins
+- If no rule matches, `defaults` is used
+- `expireAt` (optional, ms timestamp) can be used for temporary rules
+- IPv4, IPv6, CIDR, and `*` are supported
+
+#### Bandwidth Limiting (Gateway Ingress Shaping)
+
+When `bandwidthLimit` is set in the matched ingress rule:
+
+- traffic above the sustained limit is delayed (shaped)
+- if queued burst exceeds the configured burst budget, the channel is dropped
+
+Fields:
+
+- `mbps`: sustained bandwidth
+- `burstMbps` (optional): burst capacity (defaults to `mbps`)
+
+### Fingerprint Resolver (Provider Side)
+
+The provider can run a local HTTP resolver so backends (e.g. Nginx helpers/scripts) can map provider-side socket tuples back to original client metadata.
+
+Defaults:
+
+- host: `127.0.0.1`
+- port: `8080`
+- basic auth: disabled
+
+Useful options:
+
+- `--fingerprintResolverHost`
+- `--fingerprintResolverPort`
+- `--fingerprintResolverBasicAuth user:pass`
+
+Endpoints:
+
+- `GET /health`
+- `GET /resolve`
+
+### Temporary “Unlimited” Override (Gateway)
+
+The gateway can optionally expose a local `/unlimited` endpoint for trusted machines.
+
+Purpose:
+
+- let trusted machines refresh a temporary per-IP ingress override
+- remove bandwidth limits for that caller IP for a short window
+
+> [!NOTE]
+> caller IP must match token IP
+
+Enable it with:
+
+```bash
+hypergate --router <router> --gateway --listen 0.0.0.0 \
+  --unlimitedSecret "shared-secret" \
+  --unlimitedHost 127.0.0.1 \
+  --unlimitedPort 8091
+```
+
+The endpoint is intended for automation (e.g. `curl` loop on trusted hosts).
+
+Call it with `curl`:
+
+```bash
+SECRET='shared-secret'
+IP='203.0.113.10'
+
+TIMESTAMP="$(date +%s%3N)"
+PAYLOAD="{\"timestamp\":${TIMESTAMP},\"ip\":\"${IP}\"}"
+
+TOKEN="$(printf '%s' "$PAYLOAD" | openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -md sha256 -salt -pass pass:$SECRET | openssl base64 -A | tr '+/' '-_' | tr -d '=')" 
+
+curl "http://127.0.0.1:8091/unlimited?payload=${TOKEN}"
+```
+
+Token format is a single base64url string containing the OpenSSL `enc` output (`Salted__` header + salt + ciphertext), encrypted with `AES-256-CBC` + `PBKDF2`.
+
+Since the payload is encrypted and has replay protection it can be safely sent via http without additional transport security, as long as the secret is not leaked.
+
+## Common CLI Options
+
+Provider:
+
+- `--provider <services.json>`
+- `--ingressPolicy <json|path|url>` (repeatable, merged)
+- `--fingerprintResolverHost <ip>`
+- `--fingerprintResolverPort <port>`
+- `--fingerprintResolverBasicAuth <user:pass>`
+
+Gateway:
+
+- `--gateway`
+- `--listen <ip>`
+- `--unlimitedSecret <secret>`
+- `--unlimitedHost <ip>`
+- `--unlimitedPort <port>`
+
+Use `hypergate --help` for the full list.
+
+> [!NOTE]
+> Environment variables also exist for these options (`HYPERGATE_*`).
+
+## Security Notes
+
+- Treat the router secret like a credential.
+- If loading ingress policy from URLs, use trusted sources.
+
+## License / Warranty
+
+Experimental software, no warranty.
+
+See [LICENSE](LICENSE).
