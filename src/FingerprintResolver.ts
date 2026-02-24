@@ -34,7 +34,7 @@ export default class FingerprintResolver extends HttpServer {
 
     constructor(opts: FingerprintResolverOptions = {}) {
         const host = opts.host || "127.0.0.1";
-        const port = opts.port ?? 8080;
+        const port = opts.port ?? 0;
         super(host, port, (addr) => {
             console.info("Fingerprint resolver listening on http://" + addr.address + ":" + addr.port);
         });
