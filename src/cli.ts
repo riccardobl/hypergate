@@ -204,11 +204,12 @@ async function cli(processArgv: string[]) {
             ctx.serviceProvider = new ServiceProvider(
                 secret,
                 undefined,
+                fingerprintResolverPort ?
                 {
-                    host: argv.fingerprintResolverHost,
+                        host: argv.fingerprintResolverHost ?? "127.0.0.1",
                     port: fingerprintResolverPort,
                     basicAuth: argv.fingerprintResolverBasicAuth ?? null,
-                },
+                    } : undefined,
                 providerIngressPolicy,
             );
 

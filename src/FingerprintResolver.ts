@@ -45,6 +45,19 @@ export default class FingerprintResolver extends HttpServer {
             res.writeHead(200, { "content-type": "application/json" });
             res.end(JSON.stringify({ ok: true }));
         });
+        this.addListener("/all", ({ res }) => {
+            const all = Array.from(this.fingerprintByTuple.entries()).map(([key, record]) => ({
+                key,
+                protocol: record.protocol,
+                gatePort: record.gatePort,
+                channelPort: record.channelPort,
+                fingerprint: record.fingerprint,
+                createdAt: record.createdAt,
+                expiresAt: record.expiresAt,
+            }));
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify(all));
+        });
         this.addListener("/resolve", ({ req, res, url }) => {
             try {
                 if (!this.authorize(req)) {
@@ -97,8 +110,7 @@ export default class FingerprintResolver extends HttpServer {
     }
 
     public start() {
-        // HttpServer starts listening in the parent constructor.
-        // Keep this method for backward compatibility with existing call sites.
+
     }
 
     public async stop() {

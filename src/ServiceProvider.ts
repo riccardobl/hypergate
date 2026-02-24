@@ -12,19 +12,22 @@ import { Protocol, protocolToString } from "./Protocol.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
-    private readonly fingerprintResolver: FingerprintResolver;
+    private readonly fingerprintResolver?: FingerprintResolver;
     private readonly ingressPolicy?: IngressPolicy;
 
     constructor(secret: string, opts?: object, fingerprintResolverOpts?: FingerprintResolverOptions, ingressPolicy?: IngressPolicy) {
         super(secret, false, opts);
-        this.fingerprintResolver = new FingerprintResolver(fingerprintResolverOpts);
+        if (fingerprintResolverOpts) {
+            this.fingerprintResolver = new FingerprintResolver(fingerprintResolverOpts);
+            this.fingerprintResolver.start();
+        }
         this.ingressPolicy = ingressPolicy;
-        this.fingerprintResolver.start();
         this.start().catch(console.error);
+
     }
 
     public override async stop() {
-        await this.fingerprintResolver.stop();
+        await this.fingerprintResolver?.stop();
         await super.stop();
     }
 
@@ -68,11 +71,11 @@ export default class ServiceProvider extends Peer {
     }
 
     private registerFingerprintTuple(channel: any) {
-        this.fingerprintResolver.registerChannel(channel);
+        this.fingerprintResolver?.registerChannel(channel);
     }
 
     private unregisterFingerprintTuple(channel: any) {
-        this.fingerprintResolver.unregisterChannel(channel);
+        this.fingerprintResolver?.unregisterChannel(channel);
     }
 
     private createRoutingTableFragment(): RoutingTable {
