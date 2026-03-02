@@ -16,8 +16,8 @@ import {
     lookupIngressPolicy
 } from "./IngressPolicy.js";
 import LimitRemoverService from "./LimitRemoverService.js";
+import { Limits } from "./Limits.js";
 
-export const MAX_BUFFER_PER_CHANNEL = 150 * 1024 * 1024; // 150 MB
 
 type Socket = UDPNet | NetSocket;
 
@@ -59,7 +59,7 @@ export default class Gateway extends Peer {
     private readonly listenOnAddr: string;
     private readonly gates: Array<Gate> = [];
     private readonly routeFilter?: (routingEntry: RoutingEntry) => Promise<boolean>;
-    private readonly routeFindingTimeout: number = 5 * 60 * 1000; // 5 minutes
+    private readonly routeFindingTimeout: number = Limits.ROUTE_FINDING_TIMEOUT_MS;
     private limitRemoverService?: LimitRemoverService;
 
     private nextChannelId: number = 0;
@@ -125,12 +125,12 @@ export default class Gateway extends Peer {
 
         setTimeout(() => {
             this.stats();
-        }, 10 * 60_000);
+        }, Limits.STATS_INTERVAL_MS);
     }
 
     // merge routes
     private mergeRoutingTableFragment(routingTableFragment: RoutingTable, peerKey: Buffer) {
-        const routeExpiration = Date.now() + 1000 * 60; // 1 minute
+        const routeExpiration = Date.now() + Limits.ROUTE_EXPIRATION_MS;
         for (const routingEntry of routingTableFragment) {
             const gatePort = routingEntry.gatePort;
             const alias = routingEntry.serviceHost;
@@ -290,7 +290,7 @@ export default class Gateway extends Peer {
                         if (data && channel.alive) {
                             // limit how much data we buffer
                             channel.bufferSize += data.length;
-                            if (channel.bufferSize > MAX_BUFFER_PER_CHANNEL) {
+                            if (channel.bufferSize > Limits.MAX_BUFFER_PER_CHANNEL) {
                                 console.warn("Buffer limit exceeded for channel " + channelPort + ", killing it immediately");
                                 channel.buffer = [];
                                 channel.bufferSize = 0;
@@ -344,7 +344,7 @@ export default class Gateway extends Peer {
                 } catch (e) {
                     console.error(e);
                 }
-                setTimeout(timeout, 1000 * 60);
+                setTimeout(timeout, Limits.CHANNEL_TIMEOUT_POLL_MS);
             };
             timeout();
 
@@ -393,7 +393,7 @@ export default class Gateway extends Peer {
                                         fingerprint: channel.fingerprint,
                                     }),
                                 );
-                                const timeout = setTimeout(() => rej("route timeout " + gate.port + "->" + channelPort), 5000); // timeout open request
+                                const timeout = setTimeout(() => rej("route timeout " + gate.port + "->" + channelPort), Limits.OPEN_REQUEST_TIMEOUT_MS); // timeout open request
                                 this.addMessageHandler((peer, msg) => {
                                     if (msg.actionId == MessageActions.open && msg.channelPort == channelPort) {
                                         if (msg.error) {
@@ -456,7 +456,9 @@ export default class Gateway extends Peer {
                             if (Date.now() - routeFindingStartedAt > this.routeFindingTimeout) {
                                 throw new Error("Route finding timeout");
                             }
-                            await new Promise((res) => setTimeout(res, 100)); // wait 100 ms
+                            const delay = Math.floor(Math.random() * (Limits.FIND_ROUTE_RETRY_MAX_MS - Limits.FIND_ROUTE_RETRY_MIN_MS + 1)) + Limits.FIND_ROUTE_RETRY_MIN_MS;
+                            console.log("Retrying route finding in " + delay + "ms");
+                            await new Promise((res) => setTimeout(res, delay)); // wait
                         }
                     }
                 } catch (e) {

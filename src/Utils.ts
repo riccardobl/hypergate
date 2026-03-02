@@ -4,6 +4,7 @@ import Sodium from "sodium-universal";
 import HyperDHT from "@hyperswarm/dht";
 // @ts-ignore
 import b4a from "b4a";
+import { Limits } from "./Limits.js";
 
 export default class Utils {
     static getConnDuration(isUDP: boolean): number {
@@ -14,8 +15,8 @@ export default class Utils {
             // actually we want this closed by the underlying tcp stack, that's why we defacto never expire
             duration = 1000 * 60 * 60 * 24 * 360 * 21;
         } else {
-            // 1 hour for udp
-            duration = 1000 * 60 * 60;
+            // 1 hour for udp (configurable via Limits.TCP_SOCKET_TIMEOUT_MS)
+            duration = Limits?.UDP_SOCKET_TIMEOUT_MS ?? 1000 * 60 * 60;
         }
         return duration;
     }

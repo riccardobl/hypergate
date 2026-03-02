@@ -9,6 +9,7 @@ import TCPNet from "./TCPNet.js";
 import FingerprintResolver, { FingerprintResolverOptions } from "./FingerprintResolver.js";
 import { IngressPolicy } from "./IngressPolicy.js";
 import { Protocol, protocolToString } from "./Protocol.js";
+import { Limits } from "./Limits.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
@@ -211,7 +212,7 @@ export default class ServiceProvider extends Peer {
                     } catch (e) {
                         console.error(e);
                     }
-                    setTimeout(timeout, 1000 * 60);
+                    setTimeout(timeout, Limits.CHANNEL_TIMEOUT_POLL_MS);
                 };
                 timeout();
 

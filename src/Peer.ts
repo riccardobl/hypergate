@@ -9,6 +9,7 @@ import Sodium from "sodium-universal";
 import b4a from "b4a";
 import UDPNet from "./UDPNet.js";
 import Net from "net";
+import { Limits } from "./Limits.js";
 
 export type PeerChannel = {
     socket: UDPNet | Net.Socket;
@@ -137,7 +138,7 @@ export default abstract class Peer {
         const timestampBuffer = authKey.slice(0, 8 + 1);
         const timestamp = timestampBuffer.readBigInt64BE(1);
         const now = BigInt(Date.now());
-        if (now - timestamp > 1000 * 60 * 15) {
+        if (now - timestamp > Limits.PEER_STALE_MS) {
             console.error("AuthKey expired. Replay attack or clock mismatch?");
             return false;
         }
@@ -297,13 +298,13 @@ export default abstract class Peer {
         } finally {
             this.refreshing = false;
         }
-        setTimeout(() => this.refresh(), 5000);
+        setTimeout(() => this.refresh(), Limits.PEER_REFRESH_MS);
     }
 
     public async stop() {
         this.stopped = true;
         while (this.refreshing) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
+            await new Promise((resolve) => setTimeout(resolve, Limits.PEER_REFRESH_WAIT_MS));
         }
         try {
             this.swarm.destroy();

@@ -2,6 +2,7 @@ import Minimist from "minimist";
 import Utils from "./Utils.js";
 import ServiceProvider from "./ServiceProvider.js";
 import Gateway from "./Gateway.js";
+import { configureFromArgv } from "./Limits.js";
 import Fs from "fs";
 import DockerManager from "./DockerManager.js";
 import { parseIngressPolicy, type IngressPolicy } from "./IngressPolicy.js";
@@ -144,6 +145,8 @@ async function cli(processArgv: string[]) {
     const ctx: any = {};
     const argv = Minimist(processArgv.slice(2));
     loadEnvs(argv);
+    // Configure runtime limits (can be overridden by argv or env HYPERGATE_*)
+    configureFromArgv(argv);
     if (argv.help) {
         help(processArgv);
     } else {
