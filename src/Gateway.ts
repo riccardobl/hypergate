@@ -36,6 +36,7 @@ export type Channel = {
     accepted?: boolean;
     fingerprint?: { [key: string]: any };
     rateLimit?: RateLimiter;
+    pipeChain?: Promise<void>;
 };
 
 type Gate = {
@@ -250,61 +251,81 @@ export default class Gateway extends Peer {
             // store channels in gateway object
             gate.channels.push(channel);
 
-            // pipe data to route
+            // pipe data to route, serializing per-channel to preserve order.
             channel.pipeData = (data?: Buffer) => {
-                const handler = channel.rateLimit ? channel.rateLimit.handle.bind(channel.rateLimit) : ((data: Buffer, callback: () => void) => {
-                    callback();
-                    return true;
-                });
-
-                const ok = handler(data, () => {
-                    // reset expiration everytime data is piped
-                    channel.expire = Date.now() + channel.duration;
-
-                    // pipe
-                    if (channel.route) {
-                        // if route established
-                        if (channel.buffer.length > 0) {
-                            const merged = Buffer.concat(channel.buffer);
-                            channel.buffer = [];
-                            channel.bufferSize = 0;
-                            this.send(
-                                channel.route.key,
-                                Message.create(MessageActions.stream, {
-                                    channelPort: channelPort,
-                                    data: merged,
-                                }),
-                            );
-                        }
-                        if (data) {
-                            this.send(
-                                channel.route.key,
-                                Message.create(MessageActions.stream, {
-                                    channelPort: channelPort,
-                                    data: data,
-                                }),
-                            );
-                        }
-                    } else {
-                        // if still waiting for a route, buffer
-                        if (data && channel.alive) {
-                            // limit how much data we buffer
-                            channel.bufferSize += data.length;
-                            if (channel.bufferSize > Limits.MAX_BUFFER_PER_CHANNEL) {
-                                console.warn("Buffer limit exceeded for channel " + channelPort + ", killing it immediately");
-                                channel.buffer = [];
-                                channel.bufferSize = 0;
+                const run = async () => {
+                    if (!channel.alive) return;
+                    const pausable = socket as any as { pause?: () => void; resume?: () => void };
+                    const canPause = typeof pausable.pause === "function" && typeof pausable.resume === "function";
+                    const hasPayload = !!data && data.length > 0;
+                    if (hasPayload && canPause) {
+                        pausable.pause?.();
+                    }
+                    try {
+                        if (hasPayload && channel.rateLimit && channel.route) {
+                            const ok = await channel.rateLimit.acquire(data.length);
+                            if (!ok && channel.alive) {
+                                console.warn("Rate limiter rejected channel " + channelPort + ", closing");
                                 channel.close?.();
                                 return;
                             }
-                            channel.buffer.push(data);
+                        }
+
+                        // reset expiration everytime data is piped
+                        channel.expire = Date.now() + channel.duration;
+
+                        // pipe
+                        if (channel.route) {
+                            // if route established
+                            if (channel.buffer.length > 0) {
+                                const merged = Buffer.concat(channel.buffer);
+                                channel.buffer = [];
+                                channel.bufferSize = 0;
+                                this.send(
+                                    channel.route.key,
+                                    Message.create(MessageActions.stream, {
+                                        channelPort: channelPort,
+                                        data: merged,
+                                    }),
+                                );
+                            }
+                            if (data) {
+                                this.send(
+                                    channel.route.key,
+                                    Message.create(MessageActions.stream, {
+                                        channelPort: channelPort,
+                                        data: data,
+                                    }),
+                                );
+                            }
+                        } else {
+                            // if still waiting for a route, buffer
+                            if (data && channel.alive) {
+                                // limit how much data we buffer
+                                channel.bufferSize += data.length;
+                                if (channel.bufferSize > Limits.MAX_BUFFER_PER_CHANNEL) {
+                                    console.warn("Buffer limit exceeded for channel " + channelPort + ", killing it immediately");
+                                    channel.buffer = [];
+                                    channel.bufferSize = 0;
+                                    channel.close?.();
+                                    return;
+                                }
+                                channel.buffer.push(data);
+                            }
+                        }
+                    } finally {
+                        if (hasPayload && canPause && channel.alive) {
+                            pausable.resume?.();
                         }
                     }
+                };
+
+                channel.pipeChain = (channel.pipeChain ?? Promise.resolve()).then(run, run).catch((e) => {
+                    console.error(e);
+                    if (channel.alive) {
+                        channel.close?.();
+                    }
                 });
-                if (!ok && channel.alive) {
-                    console.warn("Rate limiter rejected channel " + channelPort + " (burst exceeded), closing");
-                    channel.close?.();
-                }
             };
 
             // close route (bidirectional)
