@@ -54,6 +54,16 @@ export type GatewayAdminOptions = {
     unlimitedPort?: number;
 };
 
+export function getBufferedPayloadsForFlush(protocol: Protocol, buffered: Buffer[]): Buffer[] {
+    if (buffered.length === 0) {
+        return [];
+    }
+    if (protocol == Protocol.udp) {
+        return buffered;
+    }
+    return [Buffer.concat(buffered)];
+}
+
 export default class Gateway extends Peer {
     private readonly routingTable: RoutingTable = [];
     private readonly usedChannels: Set<number> = new Set();
@@ -258,6 +268,16 @@ export default class Gateway extends Peer {
                     const pausable = socket as any as { pause?: () => void; resume?: () => void };
                     const canPause = typeof pausable.pause === "function" && typeof pausable.resume === "function";
                     const hasPayload = !!data && data.length > 0;
+                    const sendStreamData = (payload: Buffer) => {
+                        if (!channel.route) return;
+                        this.send(
+                            channel.route.key,
+                            Message.create(MessageActions.stream, {
+                                channelPort: channelPort,
+                                data: payload,
+                            }),
+                        );
+                    };
                     if (hasPayload && canPause) {
                         pausable.pause?.();
                     }
@@ -278,25 +298,15 @@ export default class Gateway extends Peer {
                         if (channel.route) {
                             // if route established
                             if (channel.buffer.length > 0) {
-                                const merged = Buffer.concat(channel.buffer);
+                                const pending = channel.buffer;
                                 channel.buffer = [];
                                 channel.bufferSize = 0;
-                                this.send(
-                                    channel.route.key,
-                                    Message.create(MessageActions.stream, {
-                                        channelPort: channelPort,
-                                        data: merged,
-                                    }),
-                                );
+                                for (const chunk of getBufferedPayloadsForFlush(gate.protocol, pending)) {
+                                    sendStreamData(chunk);
+                                }
                             }
                             if (data) {
-                                this.send(
-                                    channel.route.key,
-                                    Message.create(MessageActions.stream, {
-                                        channelPort: channelPort,
-                                        data: data,
-                                    }),
-                                );
+                                sendStreamData(data);
                             }
                         } else {
                             // if still waiting for a route, buffer
