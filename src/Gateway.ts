@@ -17,6 +17,7 @@ import {
 } from "./IngressPolicy.js";
 import LimitRemoverService from "./LimitRemoverService.js";
 import { Limits } from "./Limits.js";
+import { writeWithBackpressure } from "./RelayBackpressure.js";
 
 
 type Socket = UDPNet | NetSocket;
@@ -37,6 +38,7 @@ export type Channel = {
     fingerprint?: { [key: string]: any };
     rateLimit?: RateLimiter;
     pipeChain?: Promise<void>;
+    routePipeChain?: Promise<void>;
 };
 
 type Gate = {
@@ -468,7 +470,26 @@ export default class Gateway extends Peer {
 
                                 // pipe
                                 if (msg.actionId == MessageActions.stream && msg.channelPort == channelPort && msg.data) {
-                                    socket.write(msg.data);
+                                    const chunk = msg.data;
+                                    if (gate.protocol != Protocol.tcp) {
+                                        socket.write(chunk);
+                                        return false;
+                                    }
+
+                                    const source = peer.c;
+                                    const destination = socket as NetSocket;
+
+                                    const writeChunk = async () => {
+                                        if (!channel.alive || destination.destroyed) return;
+                                        await writeWithBackpressure(destination, source, chunk, true);
+                                    };
+
+                                    channel.routePipeChain = (channel.routePipeChain ?? Promise.resolve()).then(writeChunk, writeChunk).catch((e) => {
+                                        console.error(e);
+                                        if (channel.alive) {
+                                            channel.close?.();
+                                        }
+                                    });
                                     return false;
                                 } else if (msg.actionId == MessageActions.close && (!msg.channelPort || msg.channelPort == channelPort || msg.channelPort <= 0) /* close all */) {
                                     channel.close?.();

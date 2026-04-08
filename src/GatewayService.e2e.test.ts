@@ -5,7 +5,7 @@ import { Protocol } from './Protocol.js';
 import Net from 'net';
 import { randomBytes } from 'crypto';
 
-function waitFor(condition: () => boolean, timeoutMs = 10000, intervalMs = 100): Promise<void> {
+function waitFor(condition: () => boolean, timeoutMs = 10000, intervalMs = 100, label?: string): Promise<void> {
     const start = Date.now();
     return new Promise((resolve, reject) => {
         const iv = setInterval(() => {
@@ -15,7 +15,7 @@ function waitFor(condition: () => boolean, timeoutMs = 10000, intervalMs = 100):
                     resolve();
                 } else if (Date.now() - start > timeoutMs) {
                     clearInterval(iv);
-                    reject(new Error('timeout waiting for condition'));
+                    reject(new Error(`timeout waiting for condition${label ? ` (${label})` : ''}`));
                 }
             } catch (e) {
                 clearInterval(iv);
@@ -53,10 +53,10 @@ describe('Gateway <-> ServiceProvider end-to-end', () => {
 
         try {
             // wait until gateway has learned about the route
-            await waitFor(() => (gateway as any).routingTable && (gateway as any).routingTable.length > 0, 10000);
+            await waitFor(() => (gateway as any).routingTable && (gateway as any).routingTable.length > 0, 10000, 100, 'routing discovery');
 
             // wait until gateway opened a gate for our gatePort
-            await waitFor(() => Array.isArray((gateway as any).gates) && (gateway as any).gates.find((g: any) => g.port == gatePort), 10000);
+            await waitFor(() => Array.isArray((gateway as any).gates) && (gateway as any).gates.find((g: any) => g.port == gatePort), 10000, 100, 'gate open');
 
             const gate = (gateway as any).gates.find((g: any) => g.port == gatePort);
             expect(gate).toBeDefined();
@@ -75,7 +75,7 @@ describe('Gateway <-> ServiceProvider end-to-end', () => {
             client.write('hello');
 
             // wait for response
-            await waitFor(() => received.length > 0, 5000);
+            await waitFor(() => received.length > 0, 5000, 100, 'tcp response');
             expect(Buffer.concat(received).toString()).toBe('world');
 
             client.end();
@@ -86,4 +86,5 @@ describe('Gateway <-> ServiceProvider end-to-end', () => {
             try { server.close(); } catch { }
         }
     }, 30000);
+
 });

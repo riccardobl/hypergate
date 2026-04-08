@@ -10,6 +10,7 @@ import FingerprintResolver, { FingerprintResolverOptions } from "./FingerprintRe
 import { IngressPolicy } from "./IngressPolicy.js";
 import { Protocol, protocolToString } from "./Protocol.js";
 import { Limits } from "./Limits.js";
+import { writeWithBackpressure } from "./RelayBackpressure.js";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
@@ -252,7 +253,18 @@ export default class ServiceProvider extends Peer {
                         // every time data is piped, reset channel expire time
                         channel.expire = Date.now() + channel.duration;
                         this.registerFingerprintTuple(channel);
-                        channel.socket.write(data);
+
+                        const writeChunk = async () => {
+                            if (!channel.alive || channel.socket.destroyed) return;
+                            const useBackpressure = channel.service.protocol == Protocol.tcp;
+                            await writeWithBackpressure(channel.socket as any, peer.c, data, useBackpressure);
+                        };
+
+                        const sequenced = channel as typeof channel & { pipeChain?: Promise<void> };
+                        sequenced.pipeChain = (sequenced.pipeChain ?? Promise.resolve()).then(writeChunk, writeChunk).catch((e) => {
+                            console.error(e);
+                            closeChannel(channel.channelPort);
+                        });
                     }
                 } else if (msg.actionId == MessageActions.close) {
                     // close channel
