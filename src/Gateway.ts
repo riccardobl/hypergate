@@ -39,6 +39,7 @@ export type Channel = {
     rateLimit?: RateLimiter;
     pipeChain?: Promise<void>;
     routePipeChain?: Promise<void>;
+    queuedWriteBytes?: number;
 };
 
 type Gate = {
@@ -476,12 +477,22 @@ export default class Gateway extends Peer {
                                         return false;
                                     }
 
-                                    const source = peer.c;
                                     const destination = socket as NetSocket;
+                                    const queuedBytes = chunk.length;
+                                    channel.queuedWriteBytes = (channel.queuedWriteBytes ?? 0) + queuedBytes;
+                                    if ((channel.queuedWriteBytes ?? 0) > Limits.MAX_BUFFER_PER_CHANNEL) {
+                                        console.warn("Buffered route->gate data exceeded limit for channel " + channelPort + ", closing");
+                                        channel.close?.();
+                                        return false;
+                                    }
 
                                     const writeChunk = async () => {
-                                        if (!channel.alive || destination.destroyed) return;
-                                        await writeWithBackpressure(destination, source, chunk, true);
+                                        try {
+                                            if (!channel.alive || destination.destroyed) return;
+                                            await writeWithBackpressure(destination, undefined, chunk, true);
+                                        } finally {
+                                            channel.queuedWriteBytes = Math.max(0, (channel.queuedWriteBytes ?? 0) - queuedBytes);
+                                        }
                                     };
 
                                     channel.routePipeChain = (channel.routePipeChain ?? Promise.resolve()).then(writeChunk, writeChunk).catch((e) => {

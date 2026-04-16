@@ -17,7 +17,7 @@ export type RelayWritable = {
 
 export async function writeWithBackpressure(
     destination: RelayWritable,
-    source: PausableReadable,
+    source: PausableReadable | undefined,
     chunk: Buffer,
     useBackpressure: boolean,
 ): Promise<void> {
@@ -25,7 +25,10 @@ export async function writeWithBackpressure(
     const wrote = destination.write(chunk);
     if (!useBackpressure || wrote !== false) return;
 
-    source.pause?.();
+    const canPauseSource = !!source && typeof source.pause === "function" && typeof source.resume === "function";
+    if (canPauseSource) {
+        source.pause?.();
+    }
     await new Promise<void>((resolve) => {
         let done = false;
         const listeners: Array<() => void> = [];
@@ -50,12 +53,14 @@ export async function writeWithBackpressure(
         addListener(destination, 'close', finish);
         addListener(destination, 'end', finish);
         addListener(destination, 'error', finish);
-        addListener(source, 'close', finish);
-        addListener(source, 'end', finish);
-        addListener(source, 'error', finish);
+        if (source) {
+            addListener(source, 'close', finish);
+            addListener(source, 'end', finish);
+            addListener(source, 'error', finish);
+        }
     });
 
-    if (!source.destroyed) {
+    if (canPauseSource && !source?.destroyed) {
         source.resume?.();
     }
 }

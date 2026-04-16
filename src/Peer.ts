@@ -20,6 +20,8 @@ export type PeerChannel = {
     route: Buffer;
     channelPort: number;
     service: any;
+    pipeChain?: Promise<void>;
+    queuedWriteBytes?: number;
 };
 
 export type AuthorizedPeer = {

@@ -254,14 +254,25 @@ export default class ServiceProvider extends Peer {
                         channel.expire = Date.now() + channel.duration;
                         this.registerFingerprintTuple(channel);
 
+                        const queuedBytes = data.length;
+                        channel.queuedWriteBytes = (channel.queuedWriteBytes ?? 0) + queuedBytes;
+                        if ((channel.queuedWriteBytes ?? 0) > Limits.MAX_BUFFER_PER_CHANNEL) {
+                            console.warn("Buffered route->service data exceeded limit for channel " + channel.channelPort + ", closing");
+                            closeChannel(channel.channelPort);
+                            return;
+                        }
+
                         const writeChunk = async () => {
-                            if (!channel.alive || channel.socket.destroyed) return;
-                            const useBackpressure = channel.service.protocol == Protocol.tcp;
-                            await writeWithBackpressure(channel.socket as any, peer.c, data, useBackpressure);
+                            try {
+                                if (!channel.alive || channel.socket.destroyed) return;
+                                const useBackpressure = channel.service.protocol == Protocol.tcp;
+                                await writeWithBackpressure(channel.socket as any, undefined, data, useBackpressure);
+                            } finally {
+                                channel.queuedWriteBytes = Math.max(0, (channel.queuedWriteBytes ?? 0) - queuedBytes);
+                            }
                         };
 
-                        const sequenced = channel as typeof channel & { pipeChain?: Promise<void> };
-                        sequenced.pipeChain = (sequenced.pipeChain ?? Promise.resolve()).then(writeChunk, writeChunk).catch((e) => {
+                        channel.pipeChain = (channel.pipeChain ?? Promise.resolve()).then(writeChunk, writeChunk).catch((e) => {
                             console.error(e);
                             closeChannel(channel.channelPort);
                         });

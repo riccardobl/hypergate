@@ -57,6 +57,20 @@ describe('Relay backpressure writer', () => {
         expect(source.listenerCount('error')).toBe(0);
     });
 
+    it('can wait for drain without pausing a shared source transport', async () => {
+        const destination = new MockDestination([false]);
+
+        const writePromise = writeWithBackpressure(destination, undefined, Buffer.from('abc'), true);
+
+        expect(destination.listenerCount('drain')).toBe(1);
+
+        destination.emit('drain');
+        await writePromise;
+
+        expect(destination.listenerCount('drain')).toBe(0);
+        expect(destination.chunks.map((chunk) => chunk.toString())).toEqual(['abc']);
+    });
+
     it('preserves ordering and bytes for large sequenced transfer under intermittent backpressure', async () => {
         const source = new MockSource();
         const outcomes: boolean[] = [];
