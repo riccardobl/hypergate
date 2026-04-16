@@ -32,7 +32,7 @@ export type Channel = {
     gate: any;
     alive: boolean;
     pipeData?: (data?: Buffer) => void;
-    close?: () => void;
+    close?: (notifyPeer?: boolean) => void;
     channelPort: number;
     accepted?: boolean;
     fingerprint?: { [key: string]: any };
@@ -40,6 +40,8 @@ export type Channel = {
     pipeChain?: Promise<void>;
     routePipeChain?: Promise<void>;
     queuedWriteBytes?: number;
+    localEnded?: boolean;
+    remoteEnded?: boolean;
 };
 
 type Gate = {
@@ -342,12 +344,39 @@ export default class Gateway extends Peer {
             };
 
             // close route (bidirectional)
-            channel.close = () => {
+            const propagateEnd = (notifyPeer = true) => {
+                if (!channel.alive || channel.localEnded) return;
+                channel.localEnded = true;
+                try {
+                    if (notifyPeer && channel.route) {
+                        this.send(
+                            channel.route.key,
+                            Message.create(MessageActions.end, {
+                                channelPort: channelPort,
+                            }),
+                        );
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            };
+
+            const applyRemoteEnd = () => {
+                if (!channel.alive || channel.remoteEnded) return;
+                channel.remoteEnded = true;
+                try {
+                    socket.end();
+                } catch (e) {
+                    console.error(e);
+                }
+            };
+
+            channel.close = (notifyPeer = true) => {
                 if (!channel.alive) return;
                 channel.alive = false;
                 channel.rateLimit?.close();
                 try {
-                    if (channel.route) {
+                    if (notifyPeer && channel.route) {
                         this.send(
                             channel.route.key,
                             Message.create(MessageActions.close, {
@@ -386,8 +415,64 @@ export default class Gateway extends Peer {
             // pipe gate actions to route
             socket.on("data", channel.pipeData);
             socket.on("close", channel.close);
-            socket.on("end", channel.close);
-            socket.on("error", channel.close);
+            socket.on("end", () => propagateEnd(true));
+            socket.on("error", () => channel.close?.());
+
+            let routeMessageHandlerAttached = false;
+            const attachRouteMessageHandler = () => {
+                if (routeMessageHandlerAttached) return;
+                routeMessageHandlerAttached = true;
+                this.addMessageHandler((peer, msg) => {
+                    if (!channel.route || !peer.info.publicKey.equals(channel.route.key)) {
+                        return !channel.alive;
+                    }
+
+                    // everytime data is piped, reset expiration
+                    channel.expire = Date.now() + channel.duration;
+
+                    // pipe
+                    if (msg.actionId == MessageActions.stream && msg.channelPort == channelPort && msg.data) {
+                        const chunk = msg.data;
+                        if (gate.protocol != Protocol.tcp) {
+                            socket.write(chunk);
+                            return false;
+                        }
+
+                        const destination = socket as NetSocket;
+                        const queuedBytes = chunk.length;
+                        channel.queuedWriteBytes = (channel.queuedWriteBytes ?? 0) + queuedBytes;
+                        if ((channel.queuedWriteBytes ?? 0) > Limits.MAX_BUFFER_PER_CHANNEL) {
+                            console.warn("Buffered route->gate data exceeded limit for channel " + channelPort + ", closing");
+                            channel.close?.();
+                            return false;
+                        }
+
+                        const writeChunk = async () => {
+                            try {
+                                if (!channel.alive || destination.destroyed) return;
+                                await writeWithBackpressure(destination, undefined, chunk, true);
+                            } finally {
+                                channel.queuedWriteBytes = Math.max(0, (channel.queuedWriteBytes ?? 0) - queuedBytes);
+                            }
+                        };
+
+                        channel.routePipeChain = (channel.routePipeChain ?? Promise.resolve()).then(writeChunk, writeChunk).catch((e) => {
+                            console.error(e);
+                            if (channel.alive) {
+                                channel.close?.();
+                            }
+                        });
+                        return false;
+                    } else if (msg.actionId == MessageActions.end && msg.channelPort == channelPort) {
+                        applyRemoteEnd();
+                        return false;
+                    } else if (msg.actionId == MessageActions.close && (!msg.channelPort || msg.channelPort == channelPort || msg.channelPort <= 0) /* close all */) {
+                        channel.close?.(false);
+                        return true; // detach listener
+                    }
+                    return !channel.alive; // detach when channel dies
+                });
+            };
 
             // look for a route
             const findRoute = async () => {
@@ -436,14 +521,15 @@ export default class Gateway extends Peer {
                                         if (msg.error) {
                                             console.log("Received error", msg.error);
                                             finish(() => rej(msg.error));
-                                            return true;
+                                            return false;
                                         }
                                         console.log("Received confirmation");
                                         channel.route = r;
                                         channel.rateLimit = new RateLimiter(channelPort, routeIngressRule);
                                         channel.accepted = true;
+                                        attachRouteMessageHandler();
                                         finish(() => res());
-                                        return true;
+                                        return false;
                                     }
                                     return !channel.alive;
                                 };
@@ -482,55 +568,6 @@ export default class Gateway extends Peer {
                                 ":",
                                 socket.localPort,
                             );
-
-                            // pipe route data to gate
-                            this.addMessageHandler((peer, msg) => {
-                                if (!channel.route || !peer.info.publicKey.equals(channel.route.key)) {
-                                    return !channel.alive;
-                                }
-
-                                // everytime data is piped, reset expiration
-                                channel.expire = Date.now() + channel.duration;
-
-                                // pipe
-                                if (msg.actionId == MessageActions.stream && msg.channelPort == channelPort && msg.data) {
-                                    const chunk = msg.data;
-                                    if (gate.protocol != Protocol.tcp) {
-                                        socket.write(chunk);
-                                        return false;
-                                    }
-
-                                    const destination = socket as NetSocket;
-                                    const queuedBytes = chunk.length;
-                                    channel.queuedWriteBytes = (channel.queuedWriteBytes ?? 0) + queuedBytes;
-                                    if ((channel.queuedWriteBytes ?? 0) > Limits.MAX_BUFFER_PER_CHANNEL) {
-                                        console.warn("Buffered route->gate data exceeded limit for channel " + channelPort + ", closing");
-                                        channel.close?.();
-                                        return false;
-                                    }
-
-                                    const writeChunk = async () => {
-                                        try {
-                                            if (!channel.alive || destination.destroyed) return;
-                                            await writeWithBackpressure(destination, undefined, chunk, true);
-                                        } finally {
-                                            channel.queuedWriteBytes = Math.max(0, (channel.queuedWriteBytes ?? 0) - queuedBytes);
-                                        }
-                                    };
-
-                                    channel.routePipeChain = (channel.routePipeChain ?? Promise.resolve()).then(writeChunk, writeChunk).catch((e) => {
-                                        console.error(e);
-                                        if (channel.alive) {
-                                            channel.close?.();
-                                        }
-                                    });
-                                    return false;
-                                } else if (msg.actionId == MessageActions.close && (!msg.channelPort || msg.channelPort == channelPort || msg.channelPort <= 0) /* close all */) {
-                                    channel.close?.();
-                                    return true; // detach listener
-                                }
-                                return !channel.alive; // detach when channel dies
-                            });
 
                             // pipe pending buffered data
                             channel.pipeData?.();

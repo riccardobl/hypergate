@@ -29,7 +29,7 @@ export async function writeWithBackpressure(
     if (canPauseSource) {
         source.pause?.();
     }
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
         let done = false;
         const listeners: Array<() => void> = [];
 
@@ -42,21 +42,25 @@ export async function writeWithBackpressure(
             });
         };
 
-        const finish = () => {
+        const finish = (err?: Error) => {
             if (done) return;
             done = true;
             for (const detach of listeners) detach();
+            if (err) {
+                reject(err);
+                return;
+            }
             resolve();
         };
 
-        addListener(destination, 'drain', finish);
-        addListener(destination, 'close', finish);
-        addListener(destination, 'end', finish);
-        addListener(destination, 'error', finish);
+        addListener(destination, 'drain', () => finish());
+        addListener(destination, 'close', () => finish(new Error('Destination closed while waiting for drain')));
+        addListener(destination, 'end', () => finish(new Error('Destination ended while waiting for drain')));
+        addListener(destination, 'error', (err?: Error) => finish(err ?? new Error('Destination errored while waiting for drain')));
         if (source) {
-            addListener(source, 'close', finish);
-            addListener(source, 'end', finish);
-            addListener(source, 'error', finish);
+            addListener(source, 'close', () => finish(new Error('Source closed while waiting for drain')));
+            addListener(source, 'end', () => finish(new Error('Source ended while waiting for drain')));
+            addListener(source, 'error', (err?: Error) => finish(err ?? new Error('Source errored while waiting for drain')));
         }
     });
 

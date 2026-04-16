@@ -11,6 +11,7 @@ import { IngressPolicy } from "./IngressPolicy.js";
 import { Protocol, protocolToString } from "./Protocol.js";
 import { Limits } from "./Limits.js";
 import { writeWithBackpressure } from "./RelayBackpressure.js";
+import Net from "net";
 
 export default class ServiceProvider extends Peer {
     private services: Array<Service> = [];
@@ -111,13 +112,13 @@ export default class ServiceProvider extends Peer {
         await super.onAuthorizedMessage(peer, msg);
         try {
             // close channel bidirectional
-            const closeChannel = (channelPort: number) => {
+            const closeChannel = (channelPort: number, notifyPeer = true) => {
                 const channel = peer.channels[channelPort];
                 if (!channel || !channel.alive) return;
                 channel.alive = false;
                 this.unregisterFingerprintTuple(channel);
                 try {
-                    if (channel.route) {
+                    if (notifyPeer && channel.route && channel.openConfirmed !== false) {
                         this.send(
                             channel.route,
                             Message.create(MessageActions.close, {
@@ -181,15 +182,33 @@ export default class ServiceProvider extends Peer {
                     channelPort: channelPort,
                     service: service,
                     fingerprint: msg.fingerprint,
+                    openConfirmed: false,
                 };
                 peer.channels[channel.channelPort] = channel;
+                const pendingServiceData: Buffer[] = [];
+                let openConfirmed = false;
+                let streamingHandlersAttached = false;
+                let timeoutStarted = false;
 
-                serviceConn.on("connect", () => {
-                    this.registerFingerprintTuple(channel);
-                });
+                const sendOpenConfirmation = async () => {
+                    if (openConfirmed) return;
+                    await this.sendAsync(
+                        peer.info.publicKey,
+                        Message.create(MessageActions.open, {
+                            channelPort: msg.channelPort,
+                            gatePort: msg.gatePort,
+                            protocol: service.protocol,
+                        }),
+                    );
+                    openConfirmed = true;
+                    channel.openConfirmed = true;
 
-                // pipe from service to route
-                serviceConn.on("data", (data) => {
+                    while (pendingServiceData.length > 0) {
+                        handleServiceData(pendingServiceData.shift()!);
+                    }
+                };
+
+                const handleServiceData = (data: Buffer) => {
                     const run = async () => {
                         if (!channel.alive) return;
                         const pausable = serviceConn as any as { pause?: () => void; resume?: () => void };
@@ -220,44 +239,125 @@ export default class ServiceProvider extends Peer {
                         console.error(err);
                         closeChannel(channel.channelPort);
                     });
-                });
+                };
 
-                const timeout = () => {
-                    if (!channel.alive) return;
+                const propagateEnd = (notifyPeer = true) => {
+                    if (!channel.alive || channel.localEnded) return;
+                    channel.localEnded = true;
                     try {
-                        if (serviceConn.destroyed || channel.expire < Date.now()) {
-                            console.log("Channel expired!");
-                            closeChannel(channel.channelPort);
+                        if (notifyPeer && channel.route) {
+                            this.send(
+                                channel.route,
+                                Message.create(MessageActions.end, {
+                                    channelPort: channel.channelPort,
+                                }),
+                            );
                         }
                     } catch (e) {
                         console.error(e);
                     }
-                    setTimeout(timeout, Limits.CHANNEL_TIMEOUT_POLL_MS);
                 };
-                timeout();
+
+                const applyRemoteEnd = () => {
+                    if (!channel.alive || channel.remoteEnded) return;
+                    channel.remoteEnded = true;
+                    try {
+                        channel.socket.end();
+                    } catch (e) {
+                        console.error(e);
+                    }
+                };
+
+                const startTimeout = () => {
+                    if (timeoutStarted) return;
+                    timeoutStarted = true;
+                    const timeout = () => {
+                        if (!channel.alive) return;
+                        try {
+                            if (serviceConn.destroyed || channel.expire < Date.now()) {
+                                console.log("Channel expired!");
+                                closeChannel(channel.channelPort);
+                            }
+                        } catch (e) {
+                            console.error(e);
+                        }
+                        setTimeout(timeout, Limits.CHANNEL_TIMEOUT_POLL_MS);
+                    };
+                    timeout();
+                };
+
+                const attachStreamingHandlers = () => {
+                    if (streamingHandlersAttached) return;
+                    streamingHandlersAttached = true;
+                    serviceConn.on("data", (data) => {
+                        if (!openConfirmed) {
+                            pendingServiceData.push(Buffer.from(data));
+                            return;
+                        }
+                        handleServiceData(data);
+                    });
+
+                    serviceConn.on("close", () => {
+                        closeChannel(channel.channelPort);
+                    });
+
+                    serviceConn.on("end", () => {
+                        propagateEnd(true);
+                    });
+
+                    startTimeout();
+                };
 
                 serviceConn.on("error", (err) => {
                     console.error(err);
                     closeChannel(channel.channelPort);
                 });
 
-                serviceConn.on("close", () => {
-                    closeChannel(channel.channelPort);
-                });
+                if (isUDP) {
+                    this.registerFingerprintTuple(channel);
+                    attachStreamingHandlers();
+                    await sendOpenConfirmation();
+                } else {
+                    await new Promise<void>((resolve, reject) => {
+                        const tcpSocket = serviceConn as Net.Socket;
+                        if (!tcpSocket.connecting && !tcpSocket.destroyed) {
+                            resolve();
+                            return;
+                        }
 
-                serviceConn.on("end", () => {
-                    closeChannel(channel.channelPort);
-                });
+                        const onConnect = () => {
+                            cleanup();
+                            resolve();
+                        };
+                        const onError = (err: Error) => {
+                            cleanup();
+                            reject(err);
+                        };
+                        const onClose = () => {
+                            cleanup();
+                            reject(new Error("Service connection closed before connect"));
+                        };
+                        const onEnd = () => {
+                            cleanup();
+                            reject(new Error("Service connection ended before connect"));
+                        };
+                        const cleanup = () => {
+                            tcpSocket.off("connect", onConnect);
+                            tcpSocket.off("error", onError);
+                            tcpSocket.off("close", onClose);
+                            tcpSocket.off("end", onEnd);
+                        };
 
-                // confirm open channel
-                this.send(
-                    peer.info.publicKey,
-                    Message.create(MessageActions.open, {
-                        channelPort: msg.channelPort,
-                        gatePort: msg.gatePort,
-                        protocol: service.protocol,
-                    }),
-                );
+                        tcpSocket.on("connect", onConnect);
+                        tcpSocket.on("error", onError);
+                        tcpSocket.on("close", onClose);
+                        tcpSocket.on("end", onEnd);
+                    });
+
+                    this.registerFingerprintTuple(channel);
+                    attachStreamingHandlers();
+                    await sendOpenConfirmation();
+                }
             } else {
                 const channelPort = msg.channelPort;
                 if (channelPort == null) throw "Channel port is required";
@@ -296,14 +396,22 @@ export default class ServiceProvider extends Peer {
                             closeChannel(channel.channelPort);
                         });
                     }
+                } else if (msg.actionId == MessageActions.end) {
+                    const channel = peer.channels[channelPort];
+                    if (channel) {
+                        if (!channel.remoteEnded) {
+                            channel.remoteEnded = true;
+                            channel.socket.end();
+                        }
+                    }
                 } else if (msg.actionId == MessageActions.close) {
                     // close channel
                     if (channelPort <= 0) {
                         for (const channel of Object.values(peer.channels)) {
-                            closeChannel(channel.channelPort);
+                            closeChannel(channel.channelPort, false);
                         }
                     } else {
-                        closeChannel(channelPort);
+                        closeChannel(channelPort, false);
                     }
                 }
             }

@@ -10,7 +10,7 @@ import b4a from "b4a";
 import UDPNet from "./UDPNet.js";
 import Net from "net";
 import { Limits } from "./Limits.js";
-import { enqueuePeerWrites } from "./PeerWriteQueue.js";
+import { enqueuePeerWrites, type PeerWritePriority } from "./PeerWriteQueue.js";
 
 export type PeerChannel = {
     socket: UDPNet | Net.Socket;
@@ -23,15 +23,24 @@ export type PeerChannel = {
     service: any;
     pipeChain?: Promise<void>;
     queuedWriteBytes?: number;
+    localEnded?: boolean;
+    remoteEnded?: boolean;
+    openConfirmed?: boolean;
 };
 
 export type AuthorizedPeer = {
     c: any;
     info: any;
     channels: { [channelPort: number]: PeerChannel };
-    writeChain?: Promise<void>;
+    writeLoop?: Promise<void>;
+    controlQueue?: any[];
+    bulkQueue?: any[];
     queuedWriteBytes?: number;
 };
+
+function getPeerWritePriority(msg: Buffer): PeerWritePriority {
+    return msg.readUInt8(0) === MessageActions.stream ? 'bulk' : 'control';
+}
 
 export default abstract class Peer {
     private readonly isGate: boolean;
@@ -176,7 +185,8 @@ export default abstract class Peer {
         });
 
         const decoder = new MessageDecoder();
-        c.on("data", (data: Buffer) => {
+        let inboundChain: Promise<void> = Promise.resolve();
+        const processInboundData = async (data: Buffer) => {
             let messages: Buffer[] = [];
             try {
                 messages = decoder.feed(data);
@@ -225,13 +235,23 @@ export default abstract class Peer {
                             console.error("Unauthorized message from", b4a.toString(peer.publicKey, "hex"));
                             return;
                         } else {
-                            this.onAuthorizedMessage(aPeer, msg).catch(console.error);
+                            // Preserve frame ordering across channel control/data messages.
+                            await this.onAuthorizedMessage(aPeer, msg);
                         }
                     }
                 } catch (err) {
                     console.error("Error on message", err);
                 }
             }
+        };
+        c.on("data", (data: Buffer) => {
+            // Serialize decode+dispatch to avoid races across rapid data events.
+            inboundChain = inboundChain.then(
+                () => processInboundData(data),
+                () => processInboundData(data),
+            ).catch((err) => {
+                console.error("Error processing inbound peer data", err);
+            });
         });
 
         const authKey = this.getAuthKey(peer.publicKey);
@@ -261,12 +281,13 @@ export default abstract class Peer {
         if (!peer) throw new Error("Peer not found");
 
         const chunks = Array.isArray(msg) ? msg : [msg];
+        const priority = chunks.some((chunk) => getPeerWritePriority(chunk) === 'control') ? 'control' : 'bulk';
         const framed = chunks.map((m) => {
             console.log("Sending message to", b4a.toString(peerKey, "hex"));
             return Message.frame(m);
         });
 
-        await enqueuePeerWrites(peer, peer.c, framed, Limits.MAX_BUFFER_PER_PEER);
+        await enqueuePeerWrites(peer, peer.c, framed, Limits.MAX_BUFFER_PER_PEER, priority);
     }
 
     public send(peerKey: Buffer, msg: Buffer | Buffer[]) {

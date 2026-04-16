@@ -58,8 +58,7 @@ describe('Peer outbound write queue', () => {
         await expect(enqueuePeerWrite(state, destination, Buffer.alloc(4), 10)).rejects.toThrow(/outbound buffer exceeded/i);
 
         expect(destination.destroyed).toBe(true);
-        destination.emit('drain');
-        await blocked;
+        await expect(blocked).rejects.toThrow(/closed before queued write drained|closed while waiting for drain/i);
         expect(state.queuedWriteBytes ?? 0).toBe(0);
     });
 
@@ -70,5 +69,20 @@ describe('Peer outbound write queue', () => {
         await enqueuePeerWrites(state, destination, [Buffer.from('a'), Buffer.from('b'), Buffer.from('c')]);
 
         expect(destination.chunks.map((chunk) => chunk.toString())).toEqual(['a', 'b', 'c']);
+    });
+
+    it('prioritizes control writes ahead of queued bulk traffic', async () => {
+        const state: PeerWriteQueueState = {};
+        const destination = new MockPeerTransport([false, true, true]);
+
+        const bulk = enqueuePeerWrite(state, destination, Buffer.from('bulk-1'), 1024, 'bulk');
+        await Promise.resolve();
+        const control = enqueuePeerWrite(state, destination, Buffer.from('control'), 1024, 'control');
+        const bulk2 = enqueuePeerWrite(state, destination, Buffer.from('bulk-2'), 1024, 'bulk');
+
+        destination.emit('drain');
+        await Promise.all([bulk, control, bulk2]);
+
+        expect(destination.chunks.map((chunk) => chunk.toString())).toEqual(['bulk-1', 'control', 'bulk-2']);
     });
 });

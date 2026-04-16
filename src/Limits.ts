@@ -16,13 +16,13 @@ export type LimitsConfig = {
 };
 
 const defaults: LimitsConfig = {
-    MAX_BUFFER_PER_CHANNEL: 150 * 1024 * 1024, // 150 MB
-    MAX_BUFFER_PER_PEER: 300 * 1024 * 1024, // 300 MB
+    MAX_BUFFER_PER_CHANNEL: 8 * 1024 * 1024, // 8 MB
+    MAX_BUFFER_PER_PEER: 32 * 1024 * 1024, // 32 MB
     ROUTE_FINDING_TIMEOUT_MS: 1 * 60 * 1000, // 1 minutes
     STATS_INTERVAL_MS: 10 * 60_000, // 10 minutes
     ROUTE_EXPIRATION_MS: 2 * 1000 * 60, // 2 minute
     CHANNEL_TIMEOUT_POLL_MS: 1000 * 60, // 1 minute
-    OPEN_REQUEST_TIMEOUT_MS: 5000, // 5s
+    OPEN_REQUEST_TIMEOUT_MS: 15000, // 15s
     FIND_ROUTE_RETRY_MIN_MS: 100, // 100ms
     FIND_ROUTE_RETRY_MAX_MS: 600, // 600ms
     PEER_STALE_MS: 1000 * 60 * 15, // 15 minutes

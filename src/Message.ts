@@ -23,6 +23,7 @@ export enum MessageActions {
     stream = 2, // stream some data from/to a channel
     close = 3, // close a channel
     advRoutes = 4, // advertise peer routes
+    end = 5, // half-close a channel write side
 }
 
 export default class Message {
@@ -59,7 +60,7 @@ export default class Message {
             buffer.writeUInt32BE(msg.isGate ? 1 : 0, 2);
             buffer.set(msg.auth, 1 + 1 + 4);
             return [buffer];
-        } else if (actionId == MessageActions.close) {
+        } else if (actionId == MessageActions.close || actionId == MessageActions.end) {
             if (msg.channelPort == null) throw new Error("Channel port is required for close message");
             const buffer = Buffer.alloc(4 + 1 + 1);
             buffer.writeUInt8(actionId, 0);
@@ -175,7 +176,7 @@ export default class Message {
                 channelPort: channelPort,
                 data: data,
             };
-        } else if (actionId == MessageActions.close) {
+        } else if (actionId == MessageActions.close || actionId == MessageActions.end) {
             // close
             return {
                 actionId: actionId,

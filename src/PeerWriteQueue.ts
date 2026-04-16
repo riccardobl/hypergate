@@ -8,8 +8,18 @@ export type PeerQueueWritable = RelayWritable & {
 };
 
 export type PeerWriteQueueState = {
-    writeChain?: Promise<void>;
+    writeLoop?: Promise<void>;
+    controlQueue?: PeerQueuedWrite[];
+    bulkQueue?: PeerQueuedWrite[];
     queuedWriteBytes?: number;
+};
+
+export type PeerWritePriority = 'control' | 'bulk';
+
+type PeerQueuedWrite = {
+    chunk: Buffer;
+    resolve: () => void;
+    reject: (error: Error) => void;
 };
 
 function isWritableOpen(destination: PeerQueueWritable): boolean {
@@ -25,6 +35,7 @@ export function enqueuePeerWrite(
     destination: PeerQueueWritable,
     chunk: Buffer,
     maxQueuedBytes: number = Limits.MAX_BUFFER_PER_PEER,
+    priority: PeerWritePriority = 'bulk',
 ): Promise<void> {
     if (!chunk || chunk.length === 0) return Promise.resolve();
     if (!isWritableOpen(destination)) {
@@ -43,19 +54,58 @@ export function enqueuePeerWrite(
         return Promise.reject(err);
     }
 
-    const run = async () => {
-        try {
-            if (!isWritableOpen(destination)) {
-                throw new Error('Peer transport closed before queued write drained');
+    const queue = priority === 'control'
+        ? (state.controlQueue ??= [])
+        : (state.bulkQueue ??= []);
+
+    const operation = new Promise<void>((resolve, reject) => {
+        queue.push({ chunk, resolve, reject });
+    });
+
+    const failQueuedWrites = (error: Error) => {
+        for (const pendingQueue of [state.controlQueue, state.bulkQueue]) {
+            while (pendingQueue?.length) {
+                const pending = pendingQueue.shift();
+                if (!pending) continue;
+                state.queuedWriteBytes = Math.max(0, (state.queuedWriteBytes ?? 0) - pending.chunk.length);
+                pending.reject(error);
             }
-            await writeWithBackpressure(destination, undefined, chunk, true);
-        } finally {
-            state.queuedWriteBytes = Math.max(0, (state.queuedWriteBytes ?? 0) - chunk.length);
         }
     };
 
-    const operation = (state.writeChain ?? Promise.resolve()).then(run, run);
-    state.writeChain = operation.catch(() => undefined);
+    const runLoop = async () => {
+        while (true) {
+            const next = (state.controlQueue?.shift()) ?? (state.bulkQueue?.shift());
+            if (!next) return;
+            try {
+                if (!isWritableOpen(destination)) {
+                    throw new Error('Peer transport closed before queued write drained');
+                }
+                await writeWithBackpressure(destination, undefined, next.chunk, true);
+                next.resolve();
+            } catch (error) {
+                const err = error instanceof Error ? error : new Error(String(error));
+                next.reject(err);
+                failQueuedWrites(err);
+                return;
+            } finally {
+                state.queuedWriteBytes = Math.max(0, (state.queuedWriteBytes ?? 0) - next.chunk.length);
+            }
+        }
+    };
+
+    const startLoop = () => {
+        if (state.writeLoop) return;
+        state.writeLoop = runLoop().finally(() => {
+            state.writeLoop = undefined;
+            if ((state.controlQueue?.length ?? 0) > 0 || (state.bulkQueue?.length ?? 0) > 0) {
+                startLoop();
+            }
+        });
+    };
+
+    startLoop();
+
     return operation;
 }
 
@@ -64,8 +114,7 @@ export async function enqueuePeerWrites(
     destination: PeerQueueWritable,
     chunks: Buffer[],
     maxQueuedBytes: number = Limits.MAX_BUFFER_PER_PEER,
+    priority: PeerWritePriority = 'bulk',
 ): Promise<void> {
-    for (const chunk of chunks) {
-        await enqueuePeerWrite(state, destination, chunk, maxQueuedBytes);
-    }
+    await Promise.all(chunks.map((chunk) => enqueuePeerWrite(state, destination, chunk, maxQueuedBytes, priority)));
 }
