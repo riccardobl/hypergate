@@ -271,9 +271,9 @@ export default class Gateway extends Peer {
                     const pausable = socket as any as { pause?: () => void; resume?: () => void };
                     const canPause = typeof pausable.pause === "function" && typeof pausable.resume === "function";
                     const hasPayload = !!data && data.length > 0;
-                    const sendStreamData = (payload: Buffer) => {
+                    const sendStreamData = async (payload: Buffer) => {
                         if (!channel.route) return;
-                        this.send(
+                        await this.sendAsync(
                             channel.route.key,
                             Message.create(MessageActions.stream, {
                                 channelPort: channelPort,
@@ -305,11 +305,11 @@ export default class Gateway extends Peer {
                                 channel.buffer = [];
                                 channel.bufferSize = 0;
                                 for (const chunk of getBufferedPayloadsForFlush(gate.protocol, pending)) {
-                                    sendStreamData(chunk);
+                                    await sendStreamData(chunk);
                                 }
                             }
                             if (data) {
-                                sendStreamData(data);
+                                await sendStreamData(data);
                             }
                         } else {
                             // if still waiting for a route, buffer
@@ -343,6 +343,8 @@ export default class Gateway extends Peer {
 
             // close route (bidirectional)
             channel.close = () => {
+                if (!channel.alive) return;
+                channel.alive = false;
                 channel.rateLimit?.close();
                 try {
                     if (channel.route) {
@@ -361,7 +363,6 @@ export default class Gateway extends Peer {
                 } catch (e) {
                     console.error(e);
                 }
-                channel.alive = false;
                 this.releaseChannel(channelPort);
             };
 
@@ -416,35 +417,53 @@ export default class Gateway extends Peer {
 
                         // send open request and wait for response
                         try {
-                            await new Promise((res, rej) => {
+                            await new Promise<void>(async (res, rej) => {
                                 console.log("Test route", b4a.toString(r.key, "hex"));
-                                this.send(
-                                    r.key,
-                                    Message.create(MessageActions.open, {
-                                        channelPort: channelPort,
-                                        gatePort: gatePort,
-                                        protocol: gate.protocol,
-                                        fingerprint: channel.fingerprint,
-                                    }),
-                                );
-                                const timeout = setTimeout(() => rej("route timeout " + gate.port + "->" + channelPort), Limits.OPEN_REQUEST_TIMEOUT_MS); // timeout open request
-                                this.addMessageHandler((peer, msg) => {
+                                let settled = false;
+                                let timeout: NodeJS.Timeout | undefined;
+                                const finish = (fn: () => void) => {
+                                    if (settled) return;
+                                    settled = true;
+                                    if (timeout) clearTimeout(timeout);
+                                    this.removeMessageHandler(handler);
+                                    fn();
+                                };
+                                const handler = (peer: any, msg: any) => {
+                                    if (!peer?.info?.publicKey?.equals?.(r.key)) {
+                                        return !channel.alive;
+                                    }
                                     if (msg.actionId == MessageActions.open && msg.channelPort == channelPort) {
                                         if (msg.error) {
                                             console.log("Received error", msg.error);
-                                            rej(msg.error);
-                                            return true; // error, detach
+                                            finish(() => rej(msg.error));
+                                            return true;
                                         }
                                         console.log("Received confirmation");
                                         channel.route = r;
                                         channel.rateLimit = new RateLimiter(channelPort, routeIngressRule);
                                         channel.accepted = true;
-                                        clearTimeout(timeout);
-                                        res(channel);
-                                        return true; // detach listener
+                                        finish(() => res());
+                                        return true;
                                     }
-                                    return !channel.alive; // detach when channel dies
-                                });
+                                    return !channel.alive;
+                                };
+                                this.addMessageHandler(handler);
+                                timeout = setTimeout(() => {
+                                    finish(() => rej("route timeout " + gate.port + "->" + channelPort));
+                                }, Limits.OPEN_REQUEST_TIMEOUT_MS);
+                                try {
+                                    await this.sendAsync(
+                                        r.key,
+                                        Message.create(MessageActions.open, {
+                                            channelPort: channelPort,
+                                            gatePort: gatePort,
+                                            protocol: gate.protocol,
+                                            fingerprint: channel.fingerprint,
+                                        }),
+                                    );
+                                } catch (err) {
+                                    finish(() => rej(err));
+                                }
                             });
 
                             // found a route
@@ -466,6 +485,10 @@ export default class Gateway extends Peer {
 
                             // pipe route data to gate
                             this.addMessageHandler((peer, msg) => {
+                                if (!channel.route || !peer.info.publicKey.equals(channel.route.key)) {
+                                    return !channel.alive;
+                                }
+
                                 // everytime data is piped, reset expiration
                                 channel.expire = Date.now() + channel.duration;
 

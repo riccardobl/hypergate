@@ -2,7 +2,7 @@ import Peer from "./Peer.js";
 import Message, { MessageContent } from "./Message.js";
 import UDPNet from "./UDPNet.js";
 import { MessageActions } from "./Message.js";
-import { AuthorizedPeer } from "./Peer.js";
+import { AuthorizedPeer, PeerChannel } from "./Peer.js";
 import { RoutingTable, Service } from "./Router.js";
 import Utils from "./Utils.js";
 import TCPNet from "./TCPNet.js";
@@ -113,7 +113,8 @@ export default class ServiceProvider extends Peer {
             // close channel bidirectional
             const closeChannel = (channelPort: number) => {
                 const channel = peer.channels[channelPort];
-                if (!channel) return;
+                if (!channel || !channel.alive) return;
+                channel.alive = false;
                 this.unregisterFingerprintTuple(channel);
                 try {
                     if (channel.route) {
@@ -130,7 +131,6 @@ export default class ServiceProvider extends Peer {
                 if (channel.socket) {
                     channel.socket.end();
                 }
-                channel.alive = false;
                 delete peer.channels[channelPort];
             };
 
@@ -171,7 +171,7 @@ export default class ServiceProvider extends Peer {
 
                 const duration = Utils.getConnDuration(isUDP);
                 // create channel
-                const channel = {
+                const channel: PeerChannel & { fingerprint?: { [key: string]: any } } = {
                     socket: serviceConn,
                     duration,
                     expire: Date.now() + duration,
@@ -190,17 +190,36 @@ export default class ServiceProvider extends Peer {
 
                 // pipe from service to route
                 serviceConn.on("data", (data) => {
-                    // every time data is piped, reset channel expire time
-                    channel.expire = Date.now() + channel.duration;
-                    this.registerFingerprintTuple(channel);
+                    const run = async () => {
+                        if (!channel.alive) return;
+                        const pausable = serviceConn as any as { pause?: () => void; resume?: () => void };
+                        const canPause = typeof pausable.pause === "function" && typeof pausable.resume === "function";
+                        if (canPause) {
+                            pausable.pause?.();
+                        }
+                        try {
+                            // every time data is piped, reset channel expire time
+                            channel.expire = Date.now() + channel.duration;
+                            this.registerFingerprintTuple(channel);
 
-                    this.send(
-                        channel.route,
-                        Message.create(MessageActions.stream, {
-                            channelPort: msg.channelPort,
-                            data: data,
-                        }),
-                    );
+                            await this.sendAsync(
+                                channel.route,
+                                Message.create(MessageActions.stream, {
+                                    channelPort: msg.channelPort,
+                                    data: data,
+                                }),
+                            );
+                        } finally {
+                            if (canPause && channel.alive && !(serviceConn as any).destroyed) {
+                                pausable.resume?.();
+                            }
+                        }
+                    };
+
+                    channel.pipeChain = (channel.pipeChain ?? Promise.resolve()).then(run, run).catch((err: any) => {
+                        console.error(err);
+                        closeChannel(channel.channelPort);
+                    });
                 });
 
                 const timeout = () => {

@@ -1,5 +1,6 @@
 export type LimitsConfig = {
     MAX_BUFFER_PER_CHANNEL: number;
+    MAX_BUFFER_PER_PEER: number;
     ROUTE_FINDING_TIMEOUT_MS: number;
     STATS_INTERVAL_MS: number;
     ROUTE_EXPIRATION_MS: number;
@@ -16,6 +17,7 @@ export type LimitsConfig = {
 
 const defaults: LimitsConfig = {
     MAX_BUFFER_PER_CHANNEL: 150 * 1024 * 1024, // 150 MB
+    MAX_BUFFER_PER_PEER: 300 * 1024 * 1024, // 300 MB
     ROUTE_FINDING_TIMEOUT_MS: 1 * 60 * 1000, // 1 minutes
     STATS_INTERVAL_MS: 10 * 60_000, // 10 minutes
     ROUTE_EXPIRATION_MS: 2 * 1000 * 60, // 2 minute
@@ -41,6 +43,7 @@ function parseNumber(v: any, fallback: number) {
 export function configureFromArgv(argv: any) {
     // Prefer explicit argv values, then environment variables.
     Limits.MAX_BUFFER_PER_CHANNEL = parseNumber(argv.maxBufferPerChannel ?? process.env.HYPERGATE_MAX_BUFFER_PER_CHANNEL, defaults.MAX_BUFFER_PER_CHANNEL);
+    Limits.MAX_BUFFER_PER_PEER = parseNumber(argv.maxBufferPerPeer ?? process.env.HYPERGATE_MAX_BUFFER_PER_PEER, defaults.MAX_BUFFER_PER_PEER);
     Limits.ROUTE_FINDING_TIMEOUT_MS = parseNumber(argv.routeFindingTimeoutMs ?? process.env.HYPERGATE_ROUTE_FINDING_TIMEOUT_MS, defaults.ROUTE_FINDING_TIMEOUT_MS);
     Limits.STATS_INTERVAL_MS = parseNumber(argv.statsIntervalMs ?? process.env.HYPERGATE_STATS_INTERVAL_MS, defaults.STATS_INTERVAL_MS);
     Limits.ROUTE_EXPIRATION_MS = parseNumber(argv.routeExpirationMs ?? process.env.HYPERGATE_ROUTE_EXPIRATION_MS, defaults.ROUTE_EXPIRATION_MS);

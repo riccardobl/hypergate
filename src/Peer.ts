@@ -10,6 +10,7 @@ import b4a from "b4a";
 import UDPNet from "./UDPNet.js";
 import Net from "net";
 import { Limits } from "./Limits.js";
+import { enqueuePeerWrites } from "./PeerWriteQueue.js";
 
 export type PeerChannel = {
     socket: UDPNet | Net.Socket;
@@ -28,6 +29,8 @@ export type AuthorizedPeer = {
     c: any;
     info: any;
     channels: { [channelPort: number]: PeerChannel };
+    writeChain?: Promise<void>;
+    queuedWriteBytes?: number;
 };
 
 export default abstract class Peer {
@@ -253,19 +256,34 @@ export default abstract class Peer {
         }
     }
 
-    public send(peerKey: Buffer, msg: Buffer | Buffer[]) {
-        if (!Array.isArray(msg)) msg = [msg];
-        for (const m of msg) {
-            console.log("Sending message to", b4a.toString(peerKey, "hex"));
-            const peer = this.getAuthorizedPeerByKey(peerKey);
+    public async sendAsync(peerKey: Buffer, msg: Buffer | Buffer[]) {
+        const peer = this.getAuthorizedPeerByKey(peerKey);
+        if (!peer) throw new Error("Peer not found");
 
-            if (peer) peer.c.write(Message.frame(m));
-            else console.error("Peer not found");
-        }
+        const chunks = Array.isArray(msg) ? msg : [msg];
+        const framed = chunks.map((m) => {
+            console.log("Sending message to", b4a.toString(peerKey, "hex"));
+            return Message.frame(m);
+        });
+
+        await enqueuePeerWrites(peer, peer.c, framed, Limits.MAX_BUFFER_PER_PEER);
+    }
+
+    public send(peerKey: Buffer, msg: Buffer | Buffer[]) {
+        void this.sendAsync(peerKey, msg).catch((err) => {
+            console.error("Error sending message", err);
+        });
     }
 
     public addMessageHandler(handler: (peer: AuthorizedPeer, msg: MessageContent) => boolean) {
         this.messageHandlers.push(handler);
+    }
+
+    public removeMessageHandler(handler: (peer: AuthorizedPeer, msg: MessageContent) => boolean) {
+        const index = this.messageHandlers.indexOf(handler);
+        if (index >= 0) {
+            this.messageHandlers.splice(index, 1);
+        }
     }
 
     protected async onAuthorizedMessage(peer: AuthorizedPeer, msg: MessageContent) {
