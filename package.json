@@ -29,7 +29,8 @@
     "registry": "https://npm.pkg.github.com"
   },
   "overrides": {
-    "minimatch": "^10.2.2"
+    "minimatch": "^10.2.2",
+    "sodium-native": "5.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

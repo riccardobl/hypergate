@@ -11,7 +11,7 @@ RUN chown -R node:node /app
 
 USER node
 RUN ls /app
-RUN npm i
+RUN npm ci
 RUN npm run build
 
 LABEL hypergate.EXCLUDE="true"
