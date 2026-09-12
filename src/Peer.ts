@@ -38,6 +38,11 @@ export type AuthorizedPeer = {
     queuedWriteBytes?: number;
 };
 
+export function rejectUnauthenticatedFrames(decoder: MessageDecoder, connection: { destroy: () => void }): void {
+    decoder.reset();
+    connection.destroy();
+}
+
 function getPeerWritePriority(msg: Buffer): PeerWritePriority {
     return msg.readUInt8(0) === MessageActions.stream ? 'bulk' : 'control';
 }
@@ -222,7 +227,7 @@ export default abstract class Peer {
                         // Only gate->peer or peer->gate connections are allowed
                         if (!this.isGate && !msg.isGate) {
                             peer.ban(true);
-                            c.destroy();
+                            rejectUnauthenticatedFrames(decoder, c);
                             console.log("Ban because", b4a.toString(peer.publicKey, "hex"), "is not a gate and tried to connect to a peer", this.isGate, msg.isGate);
                             return;
                         }
@@ -231,7 +236,7 @@ export default abstract class Peer {
                             console.error("Authorization failed for peer", b4a.toString(peer.publicKey, "hex"), "Ban!");
                             console.log("Authorization failed using authkey ", b4a.toString(msg.auth, "hex"));
                             peer.ban(true);
-                            c.destroy();
+                            rejectUnauthenticatedFrames(decoder, c);
                             return;
                         }
 
@@ -247,6 +252,7 @@ export default abstract class Peer {
                         const aPeer = this.getAuthorizedPeerByKey(peer.publicKey);
                         if (!aPeer) {
                             console.error("Unauthorized message from", b4a.toString(peer.publicKey, "hex"));
+                            rejectUnauthenticatedFrames(decoder, c);
                             return;
                         } else {
                             // Preserve frame ordering across channel control/data messages.
