@@ -1,0 +1,23 @@
+import { describe, expect, it } from "vitest";
+import Message, { MAX_MESSAGE_LENGTH, MessageDecoder } from "./Message.js";
+
+describe("MessageDecoder limits", () => {
+    it("rejects an oversized first frame before buffering its payload", () => {
+        const decoder = new MessageDecoder(128);
+        const header = Buffer.alloc(4);
+        header.writeUInt32BE(129);
+        decoder.append(header);
+        expect(() => decoder.next()).toThrow("exceeds maximum");
+    });
+
+    it("can raise the limit after consuming a coalesced authentication frame", () => {
+        const decoder = new MessageDecoder(128);
+        const hello = Message.frame(Buffer.alloc(80, 1));
+        const authorizedPayload = Buffer.alloc(1024, 2);
+        decoder.append(Buffer.concat([hello, Message.frame(authorizedPayload)]));
+
+        expect(decoder.next()).toEqual(Buffer.alloc(80, 1));
+        decoder.setMaxMessageLength(MAX_MESSAGE_LENGTH);
+        expect(decoder.next()).toEqual(authorizedPayload);
+    });
+});

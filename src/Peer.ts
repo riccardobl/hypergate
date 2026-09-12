@@ -1,4 +1,4 @@
-import Message, { MessageActions, MessageContent, MessageDecoder } from "./Message.js";
+import Message, { MAX_MESSAGE_LENGTH, MAX_PRE_AUTH_MESSAGE_LENGTH, MessageActions, MessageContent, MessageDecoder } from "./Message.js";
 // @ts-ignore
 import HyperDHT from "@hyperswarm/dht";
 // @ts-ignore
@@ -184,12 +184,11 @@ export default abstract class Peer {
             closeConn();
         });
 
-        const decoder = new MessageDecoder();
+        const decoder = new MessageDecoder(MAX_PRE_AUTH_MESSAGE_LENGTH);
         let inboundChain: Promise<void> = Promise.resolve();
         const processInboundData = async (data: Buffer) => {
-            let messages: Buffer[] = [];
             try {
-                messages = decoder.feed(data);
+                decoder.append(data);
             } catch (err) {
                 console.error("Error decoding message", err);
                 closeConn();
@@ -201,7 +200,21 @@ export default abstract class Peer {
                 return;
             }
 
-            for (const message of messages) {
+            while (true) {
+                let message: Buffer | undefined;
+                try {
+                    message = decoder.next();
+                } catch (err) {
+                    console.error("Error decoding message", err);
+                    closeConn();
+                    try {
+                        c.destroy();
+                    } catch (error) {
+                        console.error("Error destroying connection", error);
+                    }
+                    return;
+                }
+                if (!message) return;
                 try {
                     const msg = Message.parse(message);
                     if (msg.actionId == MessageActions.hello) {
@@ -228,6 +241,7 @@ export default abstract class Peer {
                         }
 
                         this.addAuthorizedPeer(c, peer);
+                        decoder.setMaxMessageLength(MAX_MESSAGE_LENGTH);
                         console.info("Authorized", b4a.toString(peer.publicKey, "hex"));
                     } else {
                         const aPeer = this.getAuthorizedPeerByKey(peer.publicKey);

@@ -1,6 +1,7 @@
 import { RoutingTable } from "./Router.js";
 import { Protocol, normalizeProtocol } from "./Protocol.js";
 export const MAX_MESSAGE_LENGTH = 10 * 1024 * 1024;
+export const MAX_PRE_AUTH_MESSAGE_LENGTH = 1024;
 export const MAX_TUNNEL_FRAME = 60 * 1024; // 60KB
 export const LENGTH_PREFIX_BYTES = 4;
 
@@ -207,23 +208,41 @@ export default class Message {
 export class MessageDecoder {
     private buffer = Buffer.alloc(0);
 
-    public feed(chunk: Buffer): Buffer[] {
-        if (!chunk || chunk.length === 0) {
-            return [];
+    constructor(private maxMessageLength: number = MAX_MESSAGE_LENGTH) {}
+
+    public setMaxMessageLength(maxMessageLength: number): void {
+        if (!Number.isSafeInteger(maxMessageLength) || maxMessageLength <= 0 || maxMessageLength > MAX_MESSAGE_LENGTH) {
+            throw new Error("Invalid maximum message length");
         }
-        this.buffer = Buffer.concat([this.buffer, chunk]);
+        this.maxMessageLength = maxMessageLength;
+    }
+
+    public append(chunk: Buffer): void {
+        if (!chunk || chunk.length === 0) return;
+        this.buffer = this.buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buffer, chunk]);
+    }
+
+    public next(): Buffer | undefined {
+        if (this.buffer.length < LENGTH_PREFIX_BYTES) return undefined;
+        const length = this.buffer.readUInt32BE(0);
+        if (length > this.maxMessageLength) {
+            throw new Error("Received message exceeds maximum allowed size");
+        }
+        const total = LENGTH_PREFIX_BYTES + length;
+        if (this.buffer.length < total) return undefined;
+
+        const message = this.buffer.subarray(LENGTH_PREFIX_BYTES, total);
+        this.buffer = this.buffer.subarray(total);
+        return message;
+    }
+
+    public feed(chunk: Buffer): Buffer[] {
+        this.append(chunk);
         const messages: Buffer[] = [];
-        while (this.buffer.length >= LENGTH_PREFIX_BYTES) {
-            const length = this.buffer.readUInt32BE(0);
-            if (length > MAX_MESSAGE_LENGTH) {
-                throw new Error("Received message exceeds maximum allowed size");
-            }
-            const total = LENGTH_PREFIX_BYTES + length;
-            if (this.buffer.length < total) {
-                break;
-            }
-            messages.push(this.buffer.subarray(LENGTH_PREFIX_BYTES, total));
-            this.buffer = this.buffer.subarray(total);
+        while (true) {
+            const message = this.next();
+            if (!message) break;
+            messages.push(message);
         }
         return messages;
     }
