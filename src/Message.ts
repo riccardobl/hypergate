@@ -1,5 +1,5 @@
 import { RoutingTable } from "./Router.js";
-import { Protocol, normalizeProtocol } from "./Protocol.js";
+import { Protocol } from "./Protocol.js";
 export const MAX_MESSAGE_LENGTH = 10 * 1024 * 1024;
 export const MAX_PRE_AUTH_MESSAGE_LENGTH = 1024;
 export const MAX_TUNNEL_FRAME = 60 * 1024; // 60KB

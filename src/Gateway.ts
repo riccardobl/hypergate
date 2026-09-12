@@ -501,7 +501,7 @@ export default class Gateway extends Peer {
                     const routeFindingStartedAt = Date.now();
 
                     while (true) {
-                        const [r, t]: [Route, RoutingEntry] = this.getRoute(gatePort);
+                        const [r]: [Route, RoutingEntry] = this.getRoute(gatePort);
                         const routeIngressRule = resolveRouteIngressRule(
                             r.ingressPolicy ?? {},
                             this.limitRemoverService?.getIngressOverrides() ?? {},
@@ -522,7 +522,7 @@ export default class Gateway extends Peer {
 
                         // send open request and wait for response
                         try {
-                            await new Promise<void>(async (res, rej) => {
+                            await new Promise<void>((res, rej) => {
                                 console.log("Test route", b4a.toString(r.key, "hex"));
                                 let settled = false;
                                 let timeout: NodeJS.Timeout | undefined;
@@ -557,8 +557,7 @@ export default class Gateway extends Peer {
                                 timeout = setTimeout(() => {
                                     finish(() => rej("route timeout " + gate.port + "->" + channelPort));
                                 }, Limits.OPEN_REQUEST_TIMEOUT_MS);
-                                try {
-                                    await this.sendAsync(
+                                this.sendAsync(
                                         r.key,
                                         Message.create(MessageActions.open, {
                                             channelPort: channelPort,
@@ -566,10 +565,8 @@ export default class Gateway extends Peer {
                                             protocol: gate.protocol,
                                             fingerprint: channel.fingerprint,
                                         }),
-                                    );
-                                } catch (err) {
-                                    finish(() => rej(err));
-                                }
+                                    )
+                                    .catch((err) => finish(() => rej(err)));
                             });
 
                             // found a route
@@ -597,7 +594,9 @@ export default class Gateway extends Peer {
                         } catch (e) {
                             console.error(e);
                             if (Date.now() - routeFindingStartedAt > this.routeFindingTimeout) {
-                                throw new Error("Route finding timeout");
+                                const timeoutError = new Error("Route finding timeout") as Error & { cause: unknown };
+                                timeoutError.cause = e;
+                                throw timeoutError;
                             }
                             const delay = Math.floor(Math.random() * (Limits.FIND_ROUTE_RETRY_MAX_MS - Limits.FIND_ROUTE_RETRY_MIN_MS + 1)) + Limits.FIND_ROUTE_RETRY_MIN_MS;
                             console.log("Retrying route finding in " + delay + "ms");

@@ -23,7 +23,7 @@ export type IngressPolicy = {
     ips?: Record<string, IngressPolicyRule>;
 };
 
-export function parseIngressPolicy(...inputs: {}[]): IngressPolicy {
+export function parseIngressPolicy(...inputs: unknown[]): IngressPolicy {
     const merge: any = {};
     const blockedKeys = new Set(["__proto__", "prototype", "constructor"]);
     function recursiveMerge(target: any, source: any) {
@@ -62,7 +62,7 @@ export function lookupIngressPolicy(policy: IngressPolicy, ip: string, gatePort?
     if (policy.ips) {
         // search first by label (most important)
         if (label && policy.ips) {
-            for (const [ipPattern, rule] of Object.entries(policy.ips)) {
+            for (const rule of Object.values(policy.ips)) {
                 if (isRuleExpired(rule)) continue;
                 if (rule.labels?.includes(label)) {
                     return rule;

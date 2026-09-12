@@ -168,16 +168,24 @@ describe('Advanced Gateway <-> ServiceProvider e2e', () => {
             // cleanup limited sockets
             client2.close();
             udpServer2.close();
-            try { gateway2.stop(); } catch { }
-            try { limitedProvider2.stop(); } catch { }
+            await bestEffortCleanup(() => gateway2.stop());
+            await bestEffortCleanup(() => limitedProvider2.stop());
 
             client.close();
         } finally {
-            try { gateway.stop(); } catch { }
-            try { provider1.stop(); } catch { }
-            try { provider2.stop(); } catch { }
-            try { udpServer.close(); } catch { }
+            await bestEffortCleanup(() => gateway.stop());
+            await bestEffortCleanup(() => provider1.stop());
+            await bestEffortCleanup(() => provider2.stop());
+            await bestEffortCleanup(() => udpServer.close());
         }
     }, 60000);
 
 });
+
+async function bestEffortCleanup(cleanup: () => unknown | Promise<unknown>): Promise<void> {
+    try {
+        await cleanup();
+    } catch (error) {
+        void error;
+    }
+}

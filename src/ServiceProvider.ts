@@ -258,16 +258,6 @@ export default class ServiceProvider extends Peer {
                     }
                 };
 
-                const applyRemoteEnd = () => {
-                    if (!channel.alive || channel.remoteEnded) return;
-                    channel.remoteEnded = true;
-                    try {
-                        channel.socket.end();
-                    } catch (e) {
-                        console.error(e);
-                    }
-                };
-
                 const startTimeout = () => {
                     if (timeoutStarted) return;
                     timeoutStarted = true;
@@ -398,11 +388,9 @@ export default class ServiceProvider extends Peer {
                     }
                 } else if (msg.actionId == MessageActions.end) {
                     const channel = peer.channels[channelPort];
-                    if (channel) {
-                        if (!channel.remoteEnded) {
-                            channel.remoteEnded = true;
-                            channel.socket.end();
-                        }
+                    if (channel && !channel.remoteEnded) {
+                        channel.remoteEnded = true;
+                        channel.socket.end();
                     }
                 } else if (msg.actionId == MessageActions.close) {
                     // close channel

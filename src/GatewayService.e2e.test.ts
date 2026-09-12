@@ -35,7 +35,7 @@ describe('Gateway <-> ServiceProvider end-to-end', () => {
             });
         });
 
-        await new Promise<void>((res, rej) => server.listen(0, '127.0.0.1', () => res()));
+        await new Promise<void>((res) => server.listen(0, '127.0.0.1', () => res()));
         const srvAddr = server.address();
         if (!srvAddr || typeof srvAddr === 'string') throw new Error('invalid server address');
         const servicePort = srvAddr.port;
@@ -81,10 +81,18 @@ describe('Gateway <-> ServiceProvider end-to-end', () => {
             client.end();
             client.destroy();
         } finally {
-            try { await gateway.stop(); } catch { }
-            try { await provider.stop(); } catch { }
-            try { server.close(); } catch { }
+            await bestEffortCleanup(() => gateway.stop());
+            await bestEffortCleanup(() => provider.stop());
+            await bestEffortCleanup(() => server.close());
         }
     }, 30000);
 
 });
+
+async function bestEffortCleanup(cleanup: () => unknown | Promise<unknown>): Promise<void> {
+    try {
+        await cleanup();
+    } catch (error) {
+        void error;
+    }
+}

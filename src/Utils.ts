@@ -9,16 +9,13 @@ import { Limits } from "./Limits.js";
 export default class Utils {
     static getConnDuration(isUDP: boolean): number {
         // How long a connection will stay alive without data exchange
-        let duration = 1000 * 60;
         if (!isUDP) {
             // 21 years for tcp (it's a long time...)
             // actually we want this closed by the underlying tcp stack, that's why we defacto never expire
-            duration = 1000 * 60 * 60 * 24 * 360 * 21;
-        } else {
-            // 1 hour for udp (configurable via Limits.TCP_SOCKET_TIMEOUT_MS)
-            duration = Limits?.UDP_SOCKET_TIMEOUT_MS ?? 1000 * 60 * 60;
+            return 1000 * 60 * 60 * 24 * 360 * 21;
         }
-        return duration;
+        // 1 hour for udp (configurable via Limits.UDP_SOCKET_TIMEOUT_MS)
+        return Limits.UDP_SOCKET_TIMEOUT_MS;
     }
 
     static newSecret() {
