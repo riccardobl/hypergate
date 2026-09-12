@@ -26,6 +26,18 @@ export type FingerprintResolverOptions = {
     basicAuth?: string | null;
 };
 
+function parseBasicAuth(value?: string | null): { username: string; password: string } | undefined {
+    if (value == null || value === "") return undefined;
+    const separator = value.indexOf(":");
+    if (separator <= 0 || separator === value.length - 1) {
+        throw new Error("Fingerprint resolver basicAuth must use a non-empty username:password");
+    }
+    return {
+        username: value.slice(0, separator),
+        password: value.slice(separator + 1),
+    };
+}
+
 export default class FingerprintResolver extends HttpServer {
     private readonly fingerprintByTuple: Map<string, FingerprintRecord> = new Map();
     private readonly basicAuth?: { username: string; password: string };
@@ -33,12 +45,13 @@ export default class FingerprintResolver extends HttpServer {
     private stopped: boolean = false;
 
     constructor(opts: FingerprintResolverOptions = {}) {
+        const basicAuth = parseBasicAuth(opts.basicAuth);
         const host = opts.host || "127.0.0.1";
         const port = opts.port ?? 0;
         super(host, port, (addr) => {
             console.info("Fingerprint resolver listening on http://" + addr.address + ":" + addr.port);
         });
-        this.basicAuth = this.parseBasicAuth(opts.basicAuth);
+        this.basicAuth = basicAuth;
         this.sweepTimer = setInterval(() => this.cleanupExpiredFingerprints(), 15_000);
 
         this.addListener("/health", ({ res }) => {
@@ -181,15 +194,6 @@ export default class FingerprintResolver extends HttpServer {
         });
         res.end(JSON.stringify({ error: "unauthorized" }));
         return false;
-    }
-
-    private parseBasicAuth(value?: string | null): { username: string; password: string } | undefined {
-        if (!value || !value.includes(":")) return undefined;
-        const i = value.indexOf(":");
-        return {
-            username: value.slice(0, i),
-            password: value.slice(i + 1),
-        };
     }
 
     private normalizeIp(ip?: string): string {

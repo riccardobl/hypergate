@@ -12,6 +12,12 @@ async function getFreePort(): Promise<number> {
 }
 
 describe("FingerprintResolver authentication", () => {
+    it("fails closed for malformed configured credentials", () => {
+        expect(() => new FingerprintResolver({ basicAuth: "malformed" })).toThrow("username:password");
+        expect(() => new FingerprintResolver({ basicAuth: ":password" })).toThrow("username:password");
+        expect(() => new FingerprintResolver({ basicAuth: "user:" })).toThrow("username:password");
+    });
+
     it("protects all fingerprint data endpoints while leaving health public", async () => {
         const port = await getFreePort();
         const resolver = new FingerprintResolver({ host: "127.0.0.1", port, basicAuth: "user:pass" });
