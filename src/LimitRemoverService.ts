@@ -51,7 +51,7 @@ export default class LimitRemoverService extends HttpServer {
                     return;
                 }
 
-                const decrypted = this.decryptPayload(payload);
+                const { value: decrypted, replayKey } = this.decryptPayload(payload);
                 const ts = Number((decrypted as any).timestamp ?? (decrypted as any).ts);
                 const requestedIp = this.normalizeIp(String((decrypted as any).ip || ""));
                 if (!requestedIp || !Number.isFinite(ts)) {
@@ -72,7 +72,6 @@ export default class LimitRemoverService extends HttpServer {
                     return;
                 }
 
-                const replayKey = createHash("sha256").update(payload).digest("hex");
                 if ((this.replayCache.get(replayKey) || 0) > now) {
                     res.writeHead(409, { "content-type": "application/json" });
                     res.end(JSON.stringify({ error: "replay_detected" }));
@@ -122,8 +121,9 @@ export default class LimitRemoverService extends HttpServer {
         return raw;
     }
 
-    private decryptPayload(token: string): any {
-        const [version, encrypted, suppliedTag, ...rest] = token.trim().split(".");
+    private decryptPayload(token: string): { value: any; replayKey: string } {
+        if (token !== token.trim()) throw new Error("invalid token format");
+        const [version, encrypted, suppliedTag, ...rest] = token.split(".");
         if (version !== TOKEN_VERSION || !encrypted || !suppliedTag || rest.length > 0) throw new Error("invalid token format");
 
         const signed = `${version}.${encrypted}`;
@@ -146,13 +146,19 @@ export default class LimitRemoverService extends HttpServer {
 
         const decipher = createDecipheriv("aes-256-cbc", key, iv);
         const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
-        return JSON.parse(plaintext);
+        return {
+            value: JSON.parse(plaintext),
+            replayKey: createHash("sha256").update(signed).digest("hex"),
+        };
     }
 
     private base64urlDecode(v: string): Buffer {
+        if (!/^[A-Za-z0-9_-]+$/.test(v)) throw new Error("invalid base64url encoding");
         const pad = (4 - (v.length % 4 || 4)) % 4;
         const s = v.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(pad);
-        return Buffer.from(s, "base64");
+        const decoded = Buffer.from(s, "base64");
+        if (decoded.toString("base64url") !== v) throw new Error("non-canonical base64url encoding");
+        return decoded;
     }
 
     private normalizeIp(ip: string): string {

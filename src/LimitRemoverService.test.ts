@@ -44,4 +44,19 @@ describe("LimitRemoverService", () => {
             await service.close();
         }
     });
+
+    it("rejects alternate encodings of an already-used token", async () => {
+        const { service, url } = await startService("test-secret");
+        try {
+            const token = createUnlimitedToken("test-secret", { timestamp: Date.now(), ip: "127.0.0.1" });
+            expect((await fetch(`${url}/unlimited?payload=${token}`)).status).toBe(200);
+
+            const paddedTag = `${token}=`;
+            const response = await fetch(`${url}/unlimited?payload=${encodeURIComponent(paddedTag)}`);
+            expect(response.status).toBe(403);
+            expect(await response.json()).toEqual({ error: "invalid_token" });
+        } finally {
+            await service.close();
+        }
+    });
 });
