@@ -7,6 +7,7 @@ import Fs from "fs";
 import DockerManager from "./DockerManager.js";
 import { parseIngressPolicy, type IngressPolicy } from "./IngressPolicy.js";
 import { normalizeProtocol } from "./Protocol.js";
+import { shouldExposeRoute } from "./RouteFilter.js";
 
 function help(argv: string[] = []) {
     const launchCmd = argv[0] + " " + argv[1];
@@ -287,63 +288,23 @@ async function cli(processArgv: string[]) {
             if (unlimitedPort != null && !Number.isFinite(unlimitedPort)) {
                 throw new Error("Invalid --unlimitedPort " + argv.unlimitedPort);
             }
-            ctx.serviceGateway = new Gateway(secret, listenOn, async (entry) => {
-                if (!filters) return true;
-                for (const filter of filters) {
-                    if (filter.gatePort !== undefined && filter.gatePort != entry.gatePort) {
-                        // console.log("gatePort", filter.gatePort, entry.gatePort)
-                        return false;
-                    }
-                    if (filter.serviceHost !== undefined && filter.serviceHost != entry.serviceHost) {
-                        // console.log("serviceHost", filter.serviceHost, entry.serviceHost)
-                        return false;
-                    }
-                    if (filter.servicePort !== undefined && filter.servicePort != entry.servicePort) {
-                        // console.log("servicePort", filter.servicePort, entry.servicePort)
-                        return false;
-                    }
-                    if (filter.protocol !== undefined && filter.protocol != entry.protocol) {
-                        const filterProtocol = typeof filter.protocol === "number" ? filter.protocol : normalizeProtocol(filter.protocol);
-                        if (filterProtocol == null || filterProtocol != entry.protocol) {
-                            return false;
-                        }
-                        // console.log("protocol", filter.protocol, entry.protocol)
-                    }
-
-                    if (exposeOnlyServices && exposeOnlyServices.length > 0) {
-                        if (!exposeOnlyServices.includes(entry.serviceHost)) {
-                            // console.log("exposeOnlyServices", exposeOnlyServices, entry.serviceHost)
-                            return false;
-                        }
-                    }
-
-                    const entryTags = entry.tags?.split(" ") ?? [];
-                    if (filter.tags !== undefined) {
-                        const filterTags = filter.tags.split(" ");
-                        if (!filterTags.every((tag: string) => entryTags.includes(tag))) {
-                            // console.log/("tags", filter.tags, entryTags)
-                            return false;
-                        }
-                    }
-                    if (exposeOnlyDocker) {
-                        if (!entryTags.includes("docker")) {
-                            // console.log("docker", entryTags)
-                            return false;
-                        }
-                    }
-                    if (exposeOnlyPublished) {
-                        if (!entryTags.includes("published")) {
-                            // console.log("published", entryTags)
-                            return false;
-                        }
-                    }
-                }
-                return true;
-            }, undefined, {
-                unlimitedSecret: argv.unlimitedSecret ?? null,
-                unlimitedHost: argv.unlimitedHost,
-                unlimitedPort,
-            });
+            ctx.serviceGateway = new Gateway(
+                secret,
+                listenOn,
+                async (entry) =>
+                    shouldExposeRoute(entry, {
+                        filters,
+                        exposeOnlyServices,
+                        exposeOnlyDocker,
+                        exposeOnlyPublished,
+                    }),
+                undefined,
+                {
+                    unlimitedSecret: argv.unlimitedSecret ?? null,
+                    unlimitedHost: argv.unlimitedHost,
+                    unlimitedPort,
+                },
+            );
             if (docker) {
                 ctx.dockerManagerGW = new DockerManager(
                     ctx.serviceGateway,
