@@ -1,3 +1,6 @@
-node_modules
+.git
+.github
 build
 deploy
+node_modules
+*.AppImage
