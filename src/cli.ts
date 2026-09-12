@@ -26,7 +26,7 @@ Start a service provider:
     Provider options:
         --fingerprintResolverHost <ip> : Fingerprint resolver bind host (default 127.0.0.1)
         --fingerprintResolverPort <port> : Fingerprint resolver bind port (default 8080)
-        --fingerprintResolverBasicAuth <user:pass> : Enable basic auth for /resolve (default disabled)
+        --fingerprintResolverBasicAuth <user:pass> : Enable basic auth for /resolve and /all (default disabled)
         --ingressPolicy <json|path|url> : Provider->gateway ingress policy (defaults/ips). Can be repeated and merged.
 
 Start a service gateway:

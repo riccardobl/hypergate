@@ -45,7 +45,8 @@ export default class FingerprintResolver extends HttpServer {
             res.writeHead(200, { "content-type": "application/json" });
             res.end(JSON.stringify({ ok: true }));
         });
-        this.addListener("/all", ({ res }) => {
+        this.addListener("/all", ({ req, res }) => {
+            if (!this.requireAuthorization(req, res)) return;
             const all = Array.from(this.fingerprintByTuple.entries()).map(([key, record]) => ({
                 key,
                 protocol: record.protocol,
@@ -60,14 +61,7 @@ export default class FingerprintResolver extends HttpServer {
         });
         this.addListener("/resolve", ({ req, res, url }) => {
             try {
-                if (!this.authorize(req)) {
-                    res.writeHead(401, {
-                        "content-type": "application/json",
-                        "www-authenticate": 'Basic realm="hypergate-fingerprint-resolver"',
-                    });
-                    res.end(JSON.stringify({ error: "unauthorized" }));
-                    return;
-                }
+                if (!this.requireAuthorization(req, res)) return;
 
                 const protocol = (url.searchParams.get("proto") || url.searchParams.get("protocol") || "tcp").toLowerCase();
                 const remoteAddress = url.searchParams.get("remote_addr") || url.searchParams.get("remoteAddr") || "";
@@ -174,6 +168,19 @@ export default class FingerprintResolver extends HttpServer {
         } catch {
             return false;
         }
+    }
+
+    private requireAuthorization(
+        req: { headers: Record<string, any> },
+        res: { writeHead: (statusCode: number, headers: Record<string, string>) => unknown; end: (data?: string) => unknown },
+    ): boolean {
+        if (this.authorize(req)) return true;
+        res.writeHead(401, {
+            "content-type": "application/json",
+            "www-authenticate": 'Basic realm="hypergate-fingerprint-resolver"',
+        });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return false;
     }
 
     private parseBasicAuth(value?: string | null): { username: string; password: string } | undefined {
