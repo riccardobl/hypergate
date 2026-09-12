@@ -4,6 +4,25 @@ import ServiceProvider from "./ServiceProvider.js";
 import Gateway from "./Gateway.js";
 import { normalizeProtocol, protocolToString, Protocol } from "./Protocol.js";
 
+type DockerPort = {
+    PrivatePort: number;
+    PublicPort?: number;
+    Type: string;
+};
+
+export function filterUnexposedDockerPorts(ports: DockerPort[], unexposeLabel: string): DockerPort[] {
+    const exclusions = unexposeLabel
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+    return ports.filter((port) => {
+        const excluded =
+            exclusions.includes("*") || exclusions.includes(`${port.PrivatePort}/${port.Type}`) || exclusions.includes(`${port.PrivatePort}`);
+        if (excluded) console.log("Unexposing", port.PrivatePort, port.Type);
+        return !excluded;
+    });
+}
+
 export default class DockerManager {
     private docker: Docker;
     private router: string;
@@ -146,23 +165,15 @@ export default class DockerManager {
             const network = containerStatus.data?.NetworkSettings?.Networks[networkName];
             if (!network) continue;
 
-            const customUnExposedPorts = (labels["hypergate.UNEXPOSE"] ?? "").split(",");
             // @ts-ignore
             const ports = [
                 // @ts-ignore
-                ...container.data.Ports.filter((p: any) => {
-                    if (p.PublicPort) return true;
-                    if (customUnExposedPorts.includes("*") || customUnExposedPorts.includes(`${p.PrivatePort}/${p.Type}`) || customUnExposedPorts.includes(`${p.PrivatePort}`)) {
-                        console.log("Unexposing", p.PrivatePort, p.Type);
-                        return false;
-                    }
-                    return true;
-                }),
+                ...container.data.Ports,
             ];
 
             const customExposedPorts = (labels["hypergate.EXPOSE"] ?? "").split(",");
             for (const customPort of customExposedPorts) {
-                let [port, proto] = customPort.split("/");
+                let [port, proto] = customPort.trim().split("/");
                 if (!port) continue;
                 let privatePort;
                 let publicPort;
@@ -188,7 +199,8 @@ export default class DockerManager {
                 }
             }
             // @ts-ignore
-            const service = ports.map((ps: any) => {
+            const exposedPorts = filterUnexposedDockerPorts(ports, labels["hypergate.UNEXPOSE"] ?? "");
+            const service = exposedPorts.map((ps: any) => {
                 let servicePort = ps.PrivatePort;
                 let serviceProto = normalizeProtocol(ps.Type) ?? Protocol.tcp;
                 let serviceHost = network?.Aliases?.[0] ?? name;
