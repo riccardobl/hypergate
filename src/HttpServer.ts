@@ -11,11 +11,18 @@ export type HttpServerListenerContext = {
 
 type Listener = (ctx: HttpServerListenerContext) => void | Promise<void>;
 
+export const DEFAULT_MAX_HTTP_BODY_BYTES = 64 * 1024;
+
 export default class HttpServer {
     private readonly server: Http.Server;
     private readonly listeners: Map<string, Listener> = new Map();
 
-    constructor(private readonly host: string, private readonly port: number, onListen?: (address: AddressInfo) => void) {
+    constructor(
+        private readonly host: string,
+        private readonly port: number,
+        onListen?: (address: AddressInfo) => void,
+        private readonly maxBodyBytes: number = DEFAULT_MAX_HTTP_BODY_BYTES,
+    ) {
         this.server = Http.createServer((req, res) => {
             this.handle(req, res).catch((err) => {
                 try {
@@ -60,8 +67,20 @@ export default class HttpServer {
 
         const chunks: Buffer[] = [];
         if (method === "POST") {
+            const contentLength = Number(req.headers["content-length"] ?? 0);
+            if (Number.isFinite(contentLength) && contentLength > this.maxBodyBytes) {
+                this.rejectOversizedBody(req, res);
+                return;
+            }
+            let totalBytes = 0;
             for await (const chunk of req) {
-                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                totalBytes += buffer.length;
+                if (totalBytes > this.maxBodyBytes) {
+                    this.rejectOversizedBody(req, res);
+                    return;
+                }
+                chunks.push(buffer);
             }
         }
         const body = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
@@ -72,5 +91,11 @@ export default class HttpServer {
             method: method as "GET" | "POST",
             body,
         });
+    }
+
+    private rejectOversizedBody(req: Http.IncomingMessage, res: Http.ServerResponse) {
+        res.writeHead(413, { "content-type": "application/json", connection: "close" });
+        res.end(JSON.stringify({ error: "payload_too_large" }));
+        req.destroy();
     }
 }
