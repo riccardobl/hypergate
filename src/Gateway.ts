@@ -12,8 +12,9 @@ import { randomBytes } from "crypto";
 import { RateLimiter } from "./RateLimit.js";
 import { Protocol, protocolToString } from "./Protocol.js";
 import {
-    parseIngressPolicy,
-    lookupIngressPolicy
+    lookupIngressPolicy,
+    type IngressPolicy,
+    type IngressPolicyRule,
 } from "./IngressPolicy.js";
 import LimitRemoverService from "./LimitRemoverService.js";
 import { Limits } from "./Limits.js";
@@ -67,6 +68,25 @@ export function getBufferedPayloadsForFlush(protocol: Protocol, buffered: Buffer
         return buffered;
     }
     return [Buffer.concat(buffered)];
+}
+
+export function resolveRouteIngressRule(
+    providerPolicy: IngressPolicy,
+    localOverrides: IngressPolicy,
+    ip: string,
+    gatePort: number,
+    protocol: Protocol,
+): IngressPolicyRule | null {
+    const providerRule = lookupIngressPolicy(providerPolicy, ip, gatePort, protocol);
+    if (providerRule?.allow === false) return providerRule;
+
+    const localRule = lookupIngressPolicy(localOverrides, ip, gatePort, protocol);
+    if (!localRule) return providerRule;
+    return {
+        ...providerRule,
+        ...localRule,
+        allow: providerRule?.allow,
+    };
 }
 
 export default class Gateway extends Peer {
@@ -482,14 +502,14 @@ export default class Gateway extends Peer {
 
                     while (true) {
                         const [r, t]: [Route, RoutingEntry] = this.getRoute(gatePort);
-                        const routeIngressRule = lookupIngressPolicy(
-                            // merge route policy with local overrides if any
-                            parseIngressPolicy(r.ingressPolicy ?? {}, this.limitRemoverService?.getIngressOverrides() ?? {}),
+                        const routeIngressRule = resolveRouteIngressRule(
+                            r.ingressPolicy ?? {},
+                            this.limitRemoverService?.getIngressOverrides() ?? {},
                             remoteIp!,
                             gate.port,
                             gate.protocol,
                         );
-                        if (routeIngressRule && !routeIngressRule.allow) {
+                        if (routeIngressRule?.allow === false) {
                             throw new Error("Route denied by provider ingress policy");
                         }
                         if (channel.fingerprint) {

@@ -1,4 +1,4 @@
-import { createDecipheriv, createHash, pbkdf2Sync } from "crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "crypto";
 import HttpServer from "./HttpServer.js";
 import { IngressPolicy, IngressPolicyRule } from "./IngressPolicy.js";
 
@@ -8,6 +8,19 @@ export type LimitRemoverServiceOptions = {
     port?: number;
     onListen?: (url: string) => void;
 };
+
+const TOKEN_VERSION = "v1";
+
+export function createUnlimitedToken(secret: string, payload: object): string {
+    const salt = randomBytes(8);
+    const keyIv = pbkdf2Sync(secret, salt, 10_000, 48, "sha256");
+    const cipher = createCipheriv("aes-256-cbc", keyIv.subarray(0, 32), keyIv.subarray(32, 48));
+    const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+    const encrypted = Buffer.concat([Buffer.from("Salted__"), salt, ciphertext]).toString("base64url");
+    const signed = `${TOKEN_VERSION}.${encrypted}`;
+    const tag = createHmac("sha256", secret).update(signed).digest("base64url");
+    return `${signed}.${tag}`;
+}
 
 export default class LimitRemoverService extends HttpServer {
     private readonly secret: string;
@@ -70,7 +83,6 @@ export default class LimitRemoverService extends HttpServer {
                 const expireAt = now + 30 * 60_000;
                 if (!this.ingressOverrides.ips) this.ingressOverrides.ips = {};
                 this.ingressOverrides.ips[requestedIp] = {
-                    allow: true,
                     bandwidthLimit: null,
                     labels: ["gateway-unlimited"],
                     desc: "gateway-unlimited",
@@ -79,9 +91,9 @@ export default class LimitRemoverService extends HttpServer {
 
                 res.writeHead(200, { "content-type": "application/json" });
                 res.end(JSON.stringify({ ok: true, ip: requestedIp, expireAt }));
-            } catch (e) {
+            } catch {
                 res.writeHead(403, { "content-type": "application/json" });
-                res.end(JSON.stringify({ error: "invalid_token", detail: e?.toString?.() ?? String(e) }));
+                res.end(JSON.stringify({ error: "invalid_token" }));
             }
         });
     }
@@ -102,7 +114,7 @@ export default class LimitRemoverService extends HttpServer {
                 return undefined;
             }
         }
-        if (raw.includes("=") && !raw.includes(".")) {
+        if (raw.includes("=")) {
             const params = new URLSearchParams(raw);
             const payload = params.get("payload");
             if (payload) return payload;
@@ -111,7 +123,15 @@ export default class LimitRemoverService extends HttpServer {
     }
 
     private decryptPayload(token: string): any {
-        const blob = this.base64urlDecode(token.trim());
+        const [version, encrypted, suppliedTag, ...rest] = token.trim().split(".");
+        if (version !== TOKEN_VERSION || !encrypted || !suppliedTag || rest.length > 0) throw new Error("invalid token format");
+
+        const signed = `${version}.${encrypted}`;
+        const expectedTag = createHmac("sha256", this.secret).update(signed).digest();
+        const decodedTag = this.base64urlDecode(suppliedTag);
+        if (decodedTag.length !== expectedTag.length || !timingSafeEqual(decodedTag, expectedTag)) throw new Error("invalid token authentication");
+
+        const blob = this.base64urlDecode(encrypted);
         if (blob.length < 16) throw new Error("invalid payload");
         const magic = blob.subarray(0, 8).toString("utf8");
         if (magic !== "Salted__") throw new Error("invalid salt header");

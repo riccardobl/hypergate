@@ -306,14 +306,17 @@ IP='203.0.113.10'
 TIMESTAMP="$(date +%s%3N)"
 PAYLOAD="{\"timestamp\":${TIMESTAMP},\"ip\":\"${IP}\"}"
 
-TOKEN="$(printf '%s' "$PAYLOAD" | openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -md sha256 -salt -pass pass:$SECRET | openssl base64 -A | tr '+/' '-_' | tr -d '=')" 
+CIPHERTEXT="$(printf '%s' "$PAYLOAD" | openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -md sha256 -salt -pass pass:$SECRET | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+SIGNED="v1.${CIPHERTEXT}"
+TAG="$(printf '%s' "$SIGNED" | openssl dgst -sha256 -hmac "$SECRET" -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+TOKEN="${SIGNED}.${TAG}"
 
 curl "http://127.0.0.1:8091/unlimited?payload=${TOKEN}"
 ```
 
-Token format is a single base64url string containing the OpenSSL `enc` output (`Salted__` header + salt + ciphertext), encrypted with `AES-256-CBC` + `PBKDF2`.
+Token format is `v1.<ciphertext>.<tag>`. The ciphertext is the base64url-encoded OpenSSL `enc` output (`Salted__` header + salt + AES-256-CBC ciphertext), and the tag is HMAC-SHA-256 over `v1.<ciphertext>`.
 
-Since the payload is encrypted and has replay protection it can be safely sent via http without additional transport security, as long as the secret is not leaked.
+Use HTTPS whenever the endpoint crosses a trusted loopback boundary. Authentication and replay protection prevent token modification and reuse, but TLS also prevents interception and request racing.
 
 ## Common CLI Options
 
