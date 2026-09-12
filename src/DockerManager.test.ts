@@ -16,6 +16,11 @@ describe("DockerManager port exclusions", () => {
         expect(filterUnexposedDockerPorts(ports, " 53/udp ")).toEqual([ports[0], ports[2]]);
     });
 
+    it("matches protocol-specific exclusions case-insensitively", () => {
+        expect(filterUnexposedDockerPorts([{ PrivatePort: 80, Type: "TCP" }], "80/tcp")).toEqual([]);
+        expect(filterUnexposedDockerPorts([{ PrivatePort: 53, Type: "udp" }], "53/UDP")).toEqual([]);
+    });
+
     it("gives wildcard exclusions final precedence", () => {
         expect(filterUnexposedDockerPorts(ports, "*")).toEqual([]);
     });

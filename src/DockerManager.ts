@@ -13,11 +13,12 @@ type DockerPort = {
 export function filterUnexposedDockerPorts(ports: DockerPort[], unexposeLabel: string): DockerPort[] {
     const exclusions = unexposeLabel
         .split(",")
-        .map((value) => value.trim())
+        .map((value) => value.trim().toLowerCase())
         .filter(Boolean);
     return ports.filter((port) => {
+        const protocol = port.Type.toLowerCase();
         const excluded =
-            exclusions.includes("*") || exclusions.includes(`${port.PrivatePort}/${port.Type}`) || exclusions.includes(`${port.PrivatePort}`);
+            exclusions.includes("*") || exclusions.includes(`${port.PrivatePort}/${protocol}`) || exclusions.includes(`${port.PrivatePort}`);
         if (excluded) console.log("Unexposing", port.PrivatePort, port.Type);
         return !excluded;
     });
