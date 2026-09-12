@@ -6,6 +6,10 @@ NODE_ARCHIVE_SHA256=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03
 APPIMAGE_BUILDER_VERSION=1.1.0
 APPIMAGE_BUILDER_FILE="appimage-builder-${APPIMAGE_BUILDER_VERSION}-x86_64.AppImage"
 APPIMAGE_BUILDER_SHA256=4b4f99cae9291d78ba12dbdabca7c0a67c72aa61eb2e5d424089171a9485e96f
+APPRUN_VERSION=2.0.0
+APPRUN_SHA256=c74e7e3a085c624260f0d144c02968d00fa9383f5d7fc46b32f1dc80d371d7ff
+APPRUN_HOOKS_SHA256=1f64dd2161be3242f106c891b2daf27bbdd2103c20b28f57f61a56cdccb1eb6a
+APPIMAGE_RUNTIME_SHA256=66f5b22f035022b8bdebb54c066aa6edc7b5db282fe6cdb372e7965f80772557
 if [ "$VERSION" = "" ];
 then
     VERSION=2.0
@@ -48,6 +52,14 @@ wget --https-only "https://github.com/AppImageCrafters/appimage-builder/releases
 echo "${APPIMAGE_BUILDER_SHA256}  ./appimage-builder" | sha256sum --check --strict
 chmod +x ./appimage-builder
 ./appimage-builder  --appimage-extract 
+
+mkdir -p "appimage-build/AppRun/v${APPRUN_VERSION}" appimage-build/prime
+wget --https-only "https://github.com/AppImageCrafters/AppRun/releases/download/v${APPRUN_VERSION}/AppRun-Release-x86_64" -O "appimage-build/AppRun/v${APPRUN_VERSION}/AppRun-Release-x86_64"
+wget --https-only "https://github.com/AppImageCrafters/AppRun/releases/download/v${APPRUN_VERSION}/libapprun_hooks-Release-x86_64.so" -O "appimage-build/AppRun/v${APPRUN_VERSION}/libapprun_hooks-Release-x86_64.so"
+wget --https-only "https://github.com/AppImage/AppImageKit/releases/download/continuous/runtime-x86_64" -O appimage-build/prime/runtime-x86_64
+echo "${APPRUN_SHA256}  appimage-build/AppRun/v${APPRUN_VERSION}/AppRun-Release-x86_64" | sha256sum --check --strict
+echo "${APPRUN_HOOKS_SHA256}  appimage-build/AppRun/v${APPRUN_VERSION}/libapprun_hooks-Release-x86_64.so" | sha256sum --check --strict
+echo "${APPIMAGE_RUNTIME_SHA256}  appimage-build/prime/runtime-x86_64" | sha256sum --check --strict
 
 
 cp ../AppImageBuilder.yml .
