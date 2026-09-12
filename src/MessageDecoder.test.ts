@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Message, { MAX_MESSAGE_LENGTH, MessageDecoder } from "./Message.js";
-import { rejectUnauthenticatedFrames } from "./Peer.js";
+import { rejectMalformedPreAuthFrame, rejectUnauthenticatedFrames } from "./Peer.js";
 
 describe("MessageDecoder limits", () => {
     it("rejects an oversized first frame before buffering its payload", () => {
@@ -33,5 +33,21 @@ describe("MessageDecoder limits", () => {
 
         expect(destroyed).toBe(true);
         expect(decoder.next()).toBeUndefined();
+    });
+
+    it("closes on malformed pre-auth frames but leaves authorized error handling intact", () => {
+        const preAuthDecoder = new MessageDecoder(128);
+        preAuthDecoder.append(Message.frame(Buffer.alloc(1)));
+        let preAuthDestroyed = false;
+        expect(rejectMalformedPreAuthFrame(preAuthDecoder, { destroy: () => { preAuthDestroyed = true; } }, false)).toBe(true);
+        expect(preAuthDestroyed).toBe(true);
+        expect(preAuthDecoder.next()).toBeUndefined();
+
+        const authorizedDecoder = new MessageDecoder(128);
+        authorizedDecoder.append(Message.frame(Buffer.alloc(1)));
+        let authorizedDestroyed = false;
+        expect(rejectMalformedPreAuthFrame(authorizedDecoder, { destroy: () => { authorizedDestroyed = true; } }, true)).toBe(false);
+        expect(authorizedDestroyed).toBe(false);
+        expect(authorizedDecoder.next()).toEqual(Buffer.alloc(1));
     });
 });

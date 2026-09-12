@@ -43,6 +43,12 @@ export function rejectUnauthenticatedFrames(decoder: MessageDecoder, connection:
     connection.destroy();
 }
 
+export function rejectMalformedPreAuthFrame(decoder: MessageDecoder, connection: { destroy: () => void }, authorized: boolean): boolean {
+    if (authorized) return false;
+    rejectUnauthenticatedFrames(decoder, connection);
+    return true;
+}
+
 function getPeerWritePriority(msg: Buffer): PeerWritePriority {
     return msg.readUInt8(0) === MessageActions.stream ? 'bulk' : 'control';
 }
@@ -261,6 +267,9 @@ export default abstract class Peer {
                     }
                 } catch (err) {
                     console.error("Error on message", err);
+                    if (rejectMalformedPreAuthFrame(decoder, c, !!this.getAuthorizedPeerByKey(peer.publicKey))) {
+                        return;
+                    }
                 }
             }
         };
