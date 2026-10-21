@@ -10,6 +10,10 @@ AppDir:
     version: "$VERSION"
     exec: node/bin/node
     exec_args: $APPDIR/cli.js $@
+
+  runtime:
+    env:
+      LD_LIBRARY_PATH: '${APPDIR}/usr/lib/x86_64-linux-gnu'
      
 
 AppImage:

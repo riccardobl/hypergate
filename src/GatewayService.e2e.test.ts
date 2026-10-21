@@ -69,7 +69,7 @@ describe('Gateway <-> ServiceProvider end-to-end', () => {
             });
 
             const received: Buffer[] = [];
-            client.on('data', (d) => received.push(d));
+            client.on('data', (d: Buffer) => received.push(d));
 
             // send hello and expect world back
             client.write('hello');

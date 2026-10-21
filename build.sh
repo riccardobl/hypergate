@@ -1,8 +1,7 @@
 #!/bin/bash
 set -e
-NODE_VERSION=22.23.2
+NODE_VERSION=$(cat .node-version)
 NODE_ARCHIVE="node-v${NODE_VERSION}-linux-x64.tar.xz"
-NODE_ARCHIVE_SHA256=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307
 APPIMAGE_BUILDER_VERSION=1.1.0
 APPIMAGE_BUILDER_FILE="appimage-builder-${APPIMAGE_BUILDER_VERSION}-x86_64.AppImage"
 APPIMAGE_BUILDER_SHA256=4b4f99cae9291d78ba12dbdabca7c0a67c72aa61eb2e5d424089171a9485e96f
@@ -25,11 +24,18 @@ npm ci
 npm run build
 
 
-wget --https-only "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE}" -O build/AppDir/node.tar.xz
-echo "${NODE_ARCHIVE_SHA256}  build/AppDir/node.tar.xz" | sha256sum --check --strict
-tar -xf build/AppDir/node.tar.xz -C build/AppDir
-rm build/AppDir/node.tar.xz
-mv build/AppDir/node-*-linux-x64 build/AppDir/node
+wget --https-only "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE}" -O "build/AppDir/${NODE_ARCHIVE}"
+(cd build/AppDir && sha256sum --check --strict --ignore-missing ../../node-shasums256.txt)
+tar -xf "build/AppDir/${NODE_ARCHIVE}" -C build/AppDir
+rm "build/AppDir/${NODE_ARCHIVE}"
+mv "build/AppDir/node-v${NODE_VERSION}-linux-x64" build/AppDir/node
+test "$(build/AppDir/node/bin/node --version)" = "v${NODE_VERSION}"
+
+# Node.js 25+ requires libatomic even on systems where it is not installed.
+LIBATOMIC_PATH=$(ldd build/AppDir/node/bin/node | awk '$1 == "libatomic.so.1" && $2 == "=>" { print $3 }')
+test -f "$LIBATOMIC_PATH"
+mkdir -p build/AppDir/usr/lib/x86_64-linux-gnu
+cp -L "$LIBATOMIC_PATH" build/AppDir/usr/lib/x86_64-linux-gnu/libatomic.so.1
 
 
 cp build/dist/*.js build/AppDir
@@ -38,13 +44,13 @@ cd build/AppDir
 npm ci --prefix=. --omit=dev
 
 MAX_GLIBC=2.31
-while IFS= read -r native_addon; do
-    required_glibc=$(readelf --version-info "$native_addon" 2>/dev/null | grep -o 'GLIBC_[0-9]\+\.[0-9]\+' | sed 's/GLIBC_//' | sort -V | tail -1)
+while IFS= read -r native_binary; do
+    required_glibc=$(readelf --version-info "$native_binary" 2>/dev/null | grep -o 'GLIBC_[0-9]\+\.[0-9]\+' | sed 's/GLIBC_//' | sort -V | tail -1)
     if [ "$required_glibc" != "" ] && [ "$(printf '%s\n%s\n' "$MAX_GLIBC" "$required_glibc" | sort -V | tail -1)" != "$MAX_GLIBC" ]; then
-        echo "Native addon $native_addon requires GLIBC_$required_glibc, newer than Ubuntu 20.04 GLIBC_$MAX_GLIBC"
+        echo "Native binary $native_binary requires GLIBC_$required_glibc, newer than Ubuntu 20.04 GLIBC_$MAX_GLIBC"
         exit 1
     fi
-done < <(find node_modules -path '*/prebuilds/linux-x64/*.node' -print)
+done < <(printf '%s\n' node/bin/node usr/lib/x86_64-linux-gnu/libatomic.so.1; find node_modules -path '*/prebuilds/linux-x64/*.node' -print)
 
 cd ..
 

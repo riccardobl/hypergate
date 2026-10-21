@@ -23,6 +23,9 @@
   },
   "homepage": "https://github.com/riccardobl/hypergate",
   "type": "module",
+  "engines": {
+    "node": ">=26.12.1 <27"
+  },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
@@ -33,7 +36,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/minimist": "^1.2.5",
-    "@types/node": "^22.20.2",
+    "@types/node": "^26.6.5",
     "@typescript-eslint/eslint-plugin": "^8.70.0",
     "@typescript-eslint/parser": "^8.70.0",
     "eslint": "^10.10.0",
@@ -44,7 +47,7 @@
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.0",
-    "vite": "8.2.2",
+    "vite": "8.3.5",
     "vitest": "^4.1.11"
   },
   "scripts": {
