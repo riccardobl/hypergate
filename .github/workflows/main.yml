@@ -94,3 +94,26 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker build -t "${IMAGE}:${VERSION}" -f docker/Dockerfile .
           docker push "${IMAGE}:${VERSION}"
+
+  PublishRelease:
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      needs: [BuildBinary, BuildContainer]
+      runs-on: ubuntu-24.04
+      permissions:
+        actions: read
+        contents: write
+      steps:
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh run download "$GITHUB_RUN_ID" --name hypergate --dir deploy
+          printf '%s  deploy/hypergate\n' "$(cat deploy/hypergate.sha256)" | sha256sum --check --strict
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" deploy/hypergate deploy/hypergate.sha256 --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" deploy/hypergate deploy/hypergate.sha256 \
+              --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          fi
